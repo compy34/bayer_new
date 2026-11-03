@@ -473,7 +473,7 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, executor_name
 
     mhl_last_data_row = max(mhl_first_data_row, mhl_first_data_row + len(mhl_data_rows) - 1)
 
-    # MHL Total row
+    # MHL Total row (Total purchased)
     mhl_total_row = mhl_last_data_row + 1
     ws.cell(mhl_total_row, 1, '').font = header_font
     ws.cell(mhl_total_row, 1).border = thin_border
@@ -494,23 +494,52 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, executor_name
         top=Side(style='thin'), bottom=Side(style='double')
     )
 
-    # VAT row
-    mhl_vat_row = mhl_total_row + 1
+    # Reward row (10% of total purchased)
+    mhl_reward_row = mhl_total_row + 1
+    reward_text = (
+        f'Виногорода за забезпечення наявності у аптечному закладі '
+        f'Товарів із Рекомендованого переліку Товару Замовника, '
+        f'згідно пункту 2.2.2 Договору про маркетингові послуги №{contract_no} '
+        f'від {period_str}'
+    )
+    ws.merge_cells(start_row=mhl_reward_row, start_column=1, end_row=mhl_reward_row, end_column=6)
+    cell = ws.cell(mhl_reward_row, 1, reward_text)
+    cell.font = header_font
+    cell.alignment = left
+    cell.border = thin_border
+    # Apply border to all cells in merged range (only first cell gets value)
+    for col in range(2, 7):
+        ws.cell(mhl_reward_row, col).border = thin_border
+
+    reward_amount = round(service2_total * 0.1, 2)
+    reward_cell = ws.cell(mhl_reward_row, 7, reward_amount)
+    reward_cell.font = header_font
+    reward_cell.alignment = right
+    reward_cell.number_format = '#,##0.00'
+    reward_cell.border = Border(
+        left=Side(style='thin'), right=Side(style='thin'),
+        top=Side(style='thin'), bottom=Side(style='double')
+    )
+
+    # VAT row (20% of reward)
+    mhl_vat_row = mhl_reward_row + 1
     ws.cell(mhl_vat_row, 2, 'ПДВ 20%').font = header_font
     ws.cell(mhl_vat_row, 2).alignment = right
     ws.cell(mhl_vat_row, 2).border = thin_border
-    vat_cell = ws.cell(mhl_vat_row, 7, round(service2_total * 0.2, 2))
+    vat_amount = round(reward_amount * 0.2, 2)
+    vat_cell = ws.cell(mhl_vat_row, 7, vat_amount)
     vat_cell.font = header_font
     vat_cell.alignment = right
     vat_cell.number_format = '#,##0.00'
     vat_cell.border = thin_border
 
-    # Total with VAT row
+    # Total with VAT row (reward + VAT)
     mhl_total_vat_row = mhl_vat_row + 1
     ws.cell(mhl_total_vat_row, 2, 'Всього з ПДВ').font = header_font
     ws.cell(mhl_total_vat_row, 2).alignment = right
     ws.cell(mhl_total_vat_row, 2).border = thin_border
-    total_vat_cell = ws.cell(mhl_total_vat_row, 7, round(service2_total * 1.2, 2))
+    total_vat_amount = round(reward_amount + vat_amount, 2)
+    total_vat_cell = ws.cell(mhl_total_vat_row, 7, total_vat_amount)
     total_vat_cell.font = header_font
     total_vat_cell.alignment = right
     total_vat_cell.number_format = '#,##0.00'
