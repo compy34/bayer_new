@@ -1,6 +1,7 @@
 import pandas as pd
-from openpyxl.styles import Alignment, Border, Font, Side, PatternFill
+from openpyxl.styles import Alignment, Border, Font, Side
 from openpyxl.utils import get_column_letter
+from act_generator import generate_act_sheet
 
 # ============================================================
 # BRAND LISTS FROM TEMPLATE
@@ -26,43 +27,6 @@ DD_BRANDS_TEMPLATE = [
     'Супрадин-10',
     'Бепантен Сенсідерм-4',
     'Бепантен Сенсідерм-2',
-]
-
-# MHL SKU lists for filtering MHL data
-MHL_LIK_SKU = [
-    'Еріус сироп 0.5 мг/мл 60мл',
-    'Еріус таблетки 5 мг № 10',
-    'Антифлу Кідс, порошок пакетики №5',
-    'Аспірин С, таб. № 10',
-    'Кальцемін Адванс №60',
-    'Кальцемін Сільвер №60',
-    'Бепантен, крем 5%, туба 30г №1',
-    'Бепантен, мазь 5%, туба 30г №1',
-    'Бепантен, мазь 5%, туба 100г №1',
-    'Бепантен Плюс, крем, туба 30г №1',
-    'Елевіт Пронаталь, т.в/о №100',
-    'Реліф, супозиторїї ректальні №12',
-    'Реліф Адванс, супозиторїї ректальні №12',
-    'Реліф Про, супозиторїї ректальні №10',
-    'Реліф Ультра, супозиторїї ректальні №12',
-    'Ренні, табл. жув., мент. смак. №24',
-    "Ренні б/ц м'ятні,табл. жув.№24",
-    'Ренні з апельсиновим смаком, табл. жув. №24',
-    'Тералів, табл. 220мг №12',
-    'Терафлекс, капсули №60',
-    'Терафлекс Адванс, капсули №60',
-    'Терафлекс, капсули №120',
-]
-
-MHL_DD_SKU = [
-    'Супрадин Актив, табл. №30',
-    'Супрадин Актив, табл. шип., №15',
-    'Супрадин Ведмежуйки №30',
-    'Супрадин Ведмежуйки №60',
-    'Супрадин Бустер, табл. шип., №15',
-    'Бепантен Сенсідерм',
-    'Елевіт-Комплекс 2, капс. № 30',
-    'Елевіт-Комплекс 3, капс. № 30',
 ]
 
 # Database brand mapping (from calc_Merch_KA BRAND column to template brand names)
@@ -110,6 +74,43 @@ SERVICE_PRICES = {
     'Бепантен Сенсідерм-4': 800.0,
     'Бепантен Сенсідерм-2': 800.0,
 }
+
+# MHL SKU lists for filtering MHL data
+MHL_LIK_SKU = [
+    'Еріус сироп 0.5 мг/мл 60мл',
+    'Еріус таблетки 5 мг № 10',
+    'Антифлу Кідс, порошок пакетики №5',
+    'Аспірин С, таб. № 10',
+    'Кальцемін Адванс №60',
+    'Кальцемін Сільвер №60',
+    'Бепантен, крем 5%, туба 30г №1',
+    'Бепантен, мазь 5%, туба 30г №1',
+    'Бепантен, мазь 5%, туба 100г №1',
+    'Бепантен Плюс, крем, туба 30г №1',
+    'Елевіт Пронаталь, т.в/о №100',
+    'Реліф, супозиторїї ректальні №12',
+    'Реліф Адванс, супозиторїї ректальні №12',
+    'Реліф Про, супозиторїї ректальні №10',
+    'Реліф Ультра, супозиторїї ректальні №12',
+    'Ренні, табл. жув., мент. смак. №24',
+    "Ренні б/ц м'ятні,табл. жув.№24",
+    'Ренні з апельсиновим смаком, табл. жув. №24',
+    'Тералів, табл. 220мг №12',
+    'Терафлекс, капсули №60',
+    'Терафлекс Адванс, капсули №60',
+    'Терафлекс, капсули №120',
+]
+
+MHL_DD_SKU = [
+    'Супрадин Актив, табл. №30',
+    'Супрадин Актив, табл. шип., №15',
+    'Супрадин Ведмежуйки №30',
+    'Супрадин Ведмежуйки №60',
+    'Супрадин Бустер, табл. шип., №15',
+    'Бепантен Сенсідерм',
+    'Елевіт-Комплекс 2, капс. № 30',
+    'Елевіт-Комплекс 3, капс. № 30',
+]
 
 
 # ============================================================
@@ -176,7 +177,8 @@ def get_mhl_availability_sum(mhl_df, template_brands):
     sku_col = 'SKU_UA' if 'SKU_UA' in work_df.columns else 'Назва товару'
 
     # Filter MHL data for relevant SKUs
-    allowed_values = {str(v).strip().casefold() for v in (MHL_LIK_SKU if template_brands == LIK_BRANDS_TEMPLATE else MHL_DD_SKU)}
+    is_lic = template_brands == LIK_BRANDS_TEMPLATE
+    allowed_values = {str(v).strip().casefold() for v in (MHL_LIK_SKU if is_lic else MHL_DD_SKU)}
     sku_values = work_df[sku_col].fillna('').astype(str).str.strip().str.casefold()
     work_df = work_df[sku_values.isin(allowed_values)].copy()
 
@@ -195,7 +197,7 @@ def get_mhl_availability_sum(mhl_df, template_brands):
 
 
 # ============================================================
-# ZVIT SHEET GENERATOR (звіт викладка+MHL)
+# ZVIT SHEET GENERATOR (звіт викладка+MHL) - matches template exactly
 # ============================================================
 
 def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, executor_name, contract_no, contract_date,
@@ -293,8 +295,6 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, executor_name
     # --- Data rows ---
     start_data_row = 11
 
-    # Get responsible person from data (if available)
-    # For now, use empty string - in template it comes from PIVOT
     for idx, row_data in enumerate(pivot_df.iterrows(), start=start_data_row):
         row_values = row_data[1]
         pharmacy_name = row_values['PHARMACY_NAME']
@@ -357,7 +357,6 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, executor_name
             top=Side(style='thin'), bottom=Side(style='double')
         )
 
-    total_letter = get_column_letter(total_col)
     cell = ws.cell(total_row, total_col, round(service1_total, 2))
     cell.font = header_font
     cell.alignment = right
@@ -375,140 +374,6 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, executor_name
         ws.column_dimensions[get_column_letter(brand_start_col + i)].width = 12
     ws.column_dimensions[get_column_letter(total_col)].width = 18
 
-    # Print area
-    ws.sheet_properties.pageSetUpPr = None
-
-
-# ============================================================
-# ACT SHEET GENERATOR (акт_ЛІК / акт_ДД)
-# ============================================================
-
-def fill_act_worksheet(ws, executor_name, contract_no, contract_date, period_str,
-                        service1_sum, service2_sum, is_lic=True):
-    """Fill акт sheet matching template structure exactly."""
-    thin_border = Border(
-        left=Side(style='thin'), right=Side(style='thin'),
-        top=Side(style='thin'), bottom=Side(style='thin'),
-    )
-    center = Alignment(horizontal='center', vertical='center', wrap_text=True)
-    left = Alignment(horizontal='left', vertical='center', wrap_text=True)
-    right = Alignment(horizontal='right', vertical='center', wrap_text=True)
-    bold_font = Font(bold=True, size=12)
-    normal_font = Font(size=11)
-    title_font = Font(bold=True, size=14)
-    header_font = Font(bold=True, size=11)
-
-    act_type = "ЛІК" if is_lic else "ДД"
-
-    # Row 1: Template ID
-    ws['A1'] = 195840.0
-    ws['A1'].font = normal_font
-
-    # Row 2: Title
-    ws['A2'] = f'АКТ {act_type}'
-    ws['B2'] = '№ _______'
-    ws['A2'].font = title_font
-    ws['B2'].font = normal_font
-
-    # Row 3: Contract reference
-    ws.merge_cells('A3:Z3')
-    ws['A3'] = f'про надані послуги, відповідно до Договору про маркетингові послуги № {contract_no} від {contract_date}'
-    ws['A3'].font = normal_font
-
-    # Row 4: Parties
-    ws.merge_cells('A4:Z4')
-    ws['A4'] = f'між ТОВ «БАЙЄР» та {executor_name}'
-    ws['A4'].font = normal_font
-
-    # Row 5: Location and date
-    ws.merge_cells('A5:Z5')
-    ws['A5'] = f'м. Київ                                                                                                                                                                                                                                                   {period_str}'
-    ws['A5'].font = normal_font
-
-    # Row 7: Preamble
-    ws.merge_cells('A7:Z7')
-    ws['A7'] = (
-        f'  {executor_name}, склав цей Акт про надані послуги (надалі – «Акт») '
-        f'відповідно до Договору про маркетингові послуги № {contract_no} від {contract_date} '
-        f'(надалі – «Договір») про наступне:'
-    )
-    ws['A7'].font = normal_font
-    ws['A7'].alignment = Alignment(wrap_text=True)
-
-    # Row 8: Period
-    ws.merge_cells('A8:Z8')
-    ws['A8'] = f'1. Маркетингові послуги були надані у період {period_str}'
-    ws['A8'].font = normal_font
-
-    # Row 9: Product type
-    ws.merge_cells('A9:Z9')
-    if is_lic:
-        ws['A9'] = '2. Послуги надані стосовно Товару Замовника, який є лікарським засобом.'
-    else:
-        ws['A9'] = '2. Послуги надані стосовно Товару Замовника, який не є лікарським засобом.'
-    ws['A9'].font = normal_font
-
-    # Row 10: Services list header
-    ws.merge_cells('A10:Z10')
-    ws['A10'] = '3. Перелік наданих послуг у вказаному періоді:'
-    ws['A10'].font = normal_font
-
-    # Row 11: Table headers
-    headers = ['Найменування послуги', 'одиниця виміру', 'Сума без ПДВ', 'ПДВ 20%', 'Загальна сума з ПДВ']
-    for col_idx, header in enumerate(headers, 1):
-        cell = ws.cell(11, col_idx, header)
-        cell.font = header_font
-        cell.alignment = Alignment(wrap_text=True, horizontal='center')
-        cell.border = thin_border
-
-    # Calculate totals
-    total_no_vat = service1_sum + service2_sum
-    total_vat = round(total_no_vat * 0.2, 2)
-    total_with_vat = round(total_no_vat + total_vat, 2)
-
-    # Row 12: Service 1 - Shelf placement
-    ws['A12'] = ('Маркетингові послуги з розміщення Товару Замовника на полицях аптечних закладів '
-                 'аптечної мережі відповідно до встановленого Замовником плану викладки згідно з '
-                 'Планограмою та адресною програмою, затверджених Додатком.')
-    ws['B12'] = 'послуга'
-    ws['C12'] = round(service1_sum, 2)
-    ws['D12'] = round(service1_sum * 0.2, 2)
-    ws['E12'] = round(service1_sum * 1.2, 2)
-
-    # Row 13: Service 2 - Availability
-    ws['A13'] = ('Маркетингові послуги з забезпечення наявності у аптечному закладі Аптечної мережі '
-                 'Товарів із Рекомендованого переліку Товарів Замовника відповідно до Договору.')
-    ws['B13'] = 'послуга'
-    ws['C13'] = round(service2_sum, 2)
-    ws['D13'] = round(service2_sum * 0.2, 2)
-    ws['E13'] = round(service2_sum * 1.2, 2)
-
-    # Row 14: Totals
-    ws['A14'] = 'ЗАГАЛЬНА СУМА НАДАНИХ послуг'
-    ws['A14'].font = header_font
-    ws['B14'] = ''
-    ws['C14'] = round(total_no_vat, 2)
-    ws['C14'].font = header_font
-    ws['D14'] = round(total_vat, 2)
-    ws['D14'].font = header_font
-    ws['E14'] = round(total_with_vat, 2)
-    ws['E14'].font = header_font
-
-    # Apply borders and number formats to data rows
-    for row in range(12, 15):
-        for col in range(1, 6):
-            cell = ws.cell(row, col)
-            cell.border = thin_border
-            if col >= 3:
-                cell.number_format = '#,##0.00'
-
-    # Column widths
-    ws.column_dimensions['A'].width = 80
-    ws.column_dimensions['B'].width = 15
-    ws.column_dimensions['C'].width = 18
-    ws.column_dimensions['D'].width = 15
-    ws.column_dimensions['E'].width = 20
-
 
 # ============================================================
 # EMPTY TMA SHEETS (під час акції)
@@ -522,7 +387,7 @@ def create_empty_tma_sheet(ws, is_lic=True):
 
 
 # ============================================================
-# MAIN GENERATE FUNCTION
+# MAIN GENERATE FUNCTION - exact template sheet names
 # ============================================================
 
 def generate_excel_report(
@@ -545,7 +410,7 @@ def generate_excel_report(
     if (df is None or df.empty) and (mhl_df is None or mhl_df.empty):
         return
 
-    # Build pivot data for LIC and DD
+    # Build pivot data for LIC and DD using template brand lists
     if df is not None and not df.empty:
         pivot_lik = build_pivot_for_report(df, LIK_BRANDS_TEMPLATE)
         pivot_dd = build_pivot_for_report(df, DD_BRANDS_TEMPLATE)
@@ -606,18 +471,39 @@ def generate_excel_report(
     default_sheet = wb.active
 
     # ============================================================
-    # SHEET 1: акт_ЛІК
+    # SHEET 1: акт_ЛІК (uses act_generator for correct act structure)
     # ============================================================
     ws_akt_lik = wb.create_sheet(title='акт_ЛІК')
-    fill_act_worksheet(ws_akt_lik, executor_name, contract_no, contract_date, period_str,
-                       service1_lik, service2_lik, is_lic=True)
+    # Pass total = service1 + service2 for both services
+    generate_act_sheet(
+        ws=ws_akt_lik,
+        df_req=df_req,
+        total_sum_without_vat=service1_lik + service2_lik,
+        period_start=period_start,
+        period_end=period_end,
+        selected_pharmacy=selected_pharmacy,
+        act_number='1',
+        contract_no=contract_no,
+        contract_date=contract_date,
+        executor_name=executor_name
+    )
 
     # ============================================================
     # SHEET 2: акт_ДД
     # ============================================================
     ws_akt_dd = wb.create_sheet(title='акт_ДД')
-    fill_act_worksheet(ws_akt_dd, executor_name, contract_no, contract_date, period_str,
-                       service1_dd, service2_dd, is_lic=False)
+    generate_act_sheet(
+        ws=ws_akt_dd,
+        df_req=df_req,
+        total_sum_without_vat=service1_dd + service2_dd,
+        period_start=period_start,
+        period_end=period_end,
+        selected_pharmacy=selected_pharmacy,
+        act_number='2',
+        contract_no=contract_no,
+        contract_date=contract_date,
+        executor_name=executor_name
+    )
 
     # ============================================================
     # SHEET 3: звіт викладка+MHL(ЛІК)
@@ -657,21 +543,17 @@ def generate_excel_report(
 
 
 # ============================================================
-# PREVIEW FUNCTION (for GUI tree view)
+# DIAGNOSTIC FUNCTIONS
 # ============================================================
 
 def build_report_dataframe(df):
-    """Build combined preview dataframe for GUI tree view.
-    Returns a flat dataframe with all pharmacy-brand-merch data for both LIC and DD.
-    """
+    """Build combined preview dataframe for GUI tree view."""
     if df is None or df.empty:
         return pd.DataFrame()
 
-    # Build pivot for both LIC and DD
     pivot_lik = build_pivot_for_report(df, LIK_BRANDS_TEMPLATE)
     pivot_dd = build_pivot_for_report(df, DD_BRANDS_TEMPLATE)
 
-    # Convert to long format for display
     result_rows = []
 
     for pivot_df, brand_type in [(pivot_lik, 'ЛІК'), (pivot_dd, 'ДД')]:
@@ -695,10 +577,6 @@ def build_report_dataframe(df):
 
     return pd.DataFrame(result_rows)
 
-
-# ============================================================
-# DIAGNOSTIC FUNCTIONS
-# ============================================================
 
 def mhl_brand_counts(df):
     """Return category counts for diagnostics before Excel generation."""
