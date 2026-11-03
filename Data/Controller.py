@@ -60,7 +60,7 @@ def get_mhl_data(period_start, period_end, chain_name=None):
         )
         connection = pyodbc.connect(conn_str)
 
-        # Base query
+        # Base query with robust chain filtering (TRIM + case-insensitive)
         query = """
             SELECT
                 main.[DATE],
@@ -89,10 +89,12 @@ def get_mhl_data(period_start, period_end, chain_name=None):
 
         params = [period_start, period_end]
 
-        # Add chain filter if provided
+        # Add chain filter if provided - use TRIM and case-insensitive comparison
         if chain_name and chain_name.strip() and chain_name.strip() != 'Усі аптеки':
-            query += " AND main.[CHAIN_NAME] = ?"
-            params.append(chain_name.strip())
+            clean_chain = chain_name.strip()
+            # Use TRIM on both sides and case-insensitive comparison for robust matching
+            query += " AND LTRIM(RTRIM(LOWER(main.[CHAIN_NAME]))) = LOWER(?)"
+            params.append(clean_chain)
 
         return pd.read_sql(query, connection, params=params)
     except pyodbc.Error as error:

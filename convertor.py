@@ -201,8 +201,10 @@ def get_mhl_availability_sum(mhl_df, template_brands):
 # ============================================================
 
 def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, executor_name, contract_no, contract_date,
-                         service1_total, service2_total, is_lic=True):
-    """Fill звіт викладка+MHL sheet matching template structure exactly."""
+                         service1_total, service2_total, is_lic=True, mhl_df=None):
+    """Fill звіт викладка+MHL sheet matching template structure exactly.
+    Includes MHL data section at the bottom.
+    """
     thin_border = Border(
         left=Side(style='thin'), right=Side(style='thin'),
         top=Side(style='thin'), bottom=Side(style='thin'),
@@ -338,7 +340,7 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, executor_name
         cell.border = thin_border
         cell.number_format = '#,##0.00'
 
-    # --- Total row ---
+    # --- Total row (Service 1) ---
     last_data_row = start_data_row + len(pivot_df) - 1
     total_row = last_data_row + 1
 
@@ -366,6 +368,154 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, executor_name
         top=Side(style='thin'), bottom=Side(style='double')
     )
 
+    # ============================================================
+    # MHL SECTION (Service 2 - Availability) at the bottom
+    # ============================================================
+    mhl_start_row = total_row + 2
+
+    # MHL section title
+    ws.merge_cells(start_row=mhl_start_row, start_column=1, end_row=mhl_start_row, end_column=end_col)
+    ws.cell(mhl_start_row, 1, '2. Маркетингові послуги з забезпечення наявності у аптечному закладі Аптечної мережі Товарів із Рекомендованого переліку Товарів Замовника відповідно до Договору.')
+    ws.cell(mhl_start_row, 1).font = normal_font
+    ws.cell(mhl_start_row, 1).alignment = left
+    ws.row_dimensions[mhl_start_row].height = 40
+
+    # MHL headers
+    mhl_header_row = mhl_start_row + 1
+    mhl_headers = ['№ п/п', 'Назва товару', 'Бренд',
+                   'Відсоток аптек мережі, які мають товар',
+                   'Розрахункова ціна за одиницю товару, грн',
+                   'Кількість упаковок товару, закуплена аптечною мережею',
+                   'Сума закупленого товару, грн']
+
+    for col_idx, header in enumerate(mhl_headers, 1):
+        cell = ws.cell(mhl_header_row, col_idx, header)
+        cell.font = header_font
+        cell.alignment = center
+        cell.border = thin_border
+    ws.row_dimensions[mhl_header_row].height = 30
+
+    # Filter and prepare MHL data for this category
+    mhl_data_rows = []
+    if mhl_df is not None and not mhl_df.empty:
+        work_df = mhl_df.copy()
+        sku_col = 'SKU_UA' if 'SKU_UA' in work_df.columns else 'Назва товару'
+
+        is_lic_category = template_brands == LIK_BRANDS_TEMPLATE
+        allowed_values = {str(v).strip().casefold() for v in (MHL_LIK_SKU if is_lic_category else MHL_DD_SKU)}
+        sku_values = work_df[sku_col].fillna('').astype(str).str.strip().str.casefold()
+        work_df = work_df[sku_values.isin(allowed_values)].copy()
+
+        if not work_df.empty:
+            for column in ['PENETRATION', 'PRICE_CP', 'SUPPLY', 'PENETRATION_TARGET']:
+                work_df[column] = pd.to_numeric(work_df[column], errors='coerce').fillna(0)
+
+            work_df['Сума закупленого'] = work_df['SUPPLY'] * work_df['PRICE_CP']
+            work_df['eligible'] = work_df['PENETRATION'] >= work_df['PENETRATION_TARGET']
+            work_df = work_df[work_df['eligible']]
+
+            if not work_df.empty:
+                # Group by product for display
+                group_cols = ['DRUG_ID', 'SKU_UA', 'BRAND']
+                agg_dict = {
+                    'PENETRATION': 'last',
+                    'PRICE_CP': 'last',
+                    'SUPPLY': 'sum',
+                    'PENETRATION_TARGET': 'last',
+                    'Сума закупленого': 'sum',
+                }
+                if all(c in work_df.columns for c in group_cols):
+                    work_df = work_df.groupby(group_cols, dropna=False).agg(agg_dict).reset_index()
+
+                for _, row in work_df.iterrows():
+                    mhl_data_rows.append({
+                        'Назва товару': row.get('SKU_UA', ''),
+                        'Бренд': row.get('BRAND', ''),
+                        'PENETRATION': row.get('PENETRATION', 0),
+                        'PRICE_CP': row.get('PRICE_CP', 0),
+                        'SUPPLY': row.get('SUPPLY', 0),
+                        'Сума закупленого': row.get('Сума закупленого', 0),
+                    })
+
+    # Write MHL data rows
+    mhl_first_data_row = mhl_header_row + 1
+    for idx, mhl_row in enumerate(mhl_data_rows, start=mhl_first_data_row):
+        ws.cell(idx, 1, idx - mhl_first_data_row + 1).font = normal_font
+        ws.cell(idx, 1).alignment = center
+        ws.cell(idx, 1).border = thin_border
+
+        ws.cell(idx, 2, mhl_row['Назва товару']).font = normal_font
+        ws.cell(idx, 2).alignment = left
+        ws.cell(idx, 2).border = thin_border
+
+        ws.cell(idx, 3, mhl_row['Бренд']).font = normal_font
+        ws.cell(idx, 3).alignment = left
+        ws.cell(idx, 3).border = thin_border
+
+        ws.cell(idx, 4, round(mhl_row['PENETRATION'] * 100, 2)).font = normal_font
+        ws.cell(idx, 4).alignment = center
+        ws.cell(idx, 4).border = thin_border
+        ws.cell(idx, 4).number_format = '0.00'
+
+        ws.cell(idx, 5, round(mhl_row['PRICE_CP'], 2)).font = normal_font
+        ws.cell(idx, 5).alignment = right
+        ws.cell(idx, 5).border = thin_border
+        ws.cell(idx, 5).number_format = '#,##0.00'
+
+        ws.cell(idx, 6, int(mhl_row['SUPPLY'])).font = normal_font
+        ws.cell(idx, 6).alignment = center
+        ws.cell(idx, 6).border = thin_border
+
+        ws.cell(idx, 7, round(mhl_row['Сума закупленого'], 2)).font = normal_font
+        ws.cell(idx, 7).alignment = right
+        ws.cell(idx, 7).border = thin_border
+        ws.cell(idx, 7).number_format = '#,##0.00'
+
+    mhl_last_data_row = max(mhl_first_data_row, mhl_first_data_row + len(mhl_data_rows) - 1)
+
+    # MHL Total row
+    mhl_total_row = mhl_last_data_row + 1
+    ws.cell(mhl_total_row, 1, '').font = header_font
+    ws.cell(mhl_total_row, 1).border = thin_border
+    ws.cell(mhl_total_row, 2, 'ВСЬОГО закуплено товару, грн.').font = header_font
+    ws.cell(mhl_total_row, 2).alignment = right
+    ws.cell(mhl_total_row, 2).border = thin_border
+
+    for col in range(3, 7):
+        ws.cell(mhl_total_row, col, '').font = header_font
+        ws.cell(mhl_total_row, col).border = thin_border
+
+    total_cell = ws.cell(mhl_total_row, 7, round(service2_total, 2))
+    total_cell.font = header_font
+    total_cell.alignment = right
+    total_cell.number_format = '#,##0.00'
+    total_cell.border = Border(
+        left=Side(style='thin'), right=Side(style='thin'),
+        top=Side(style='thin'), bottom=Side(style='double')
+    )
+
+    # VAT row
+    mhl_vat_row = mhl_total_row + 1
+    ws.cell(mhl_vat_row, 2, 'ПДВ 20%').font = header_font
+    ws.cell(mhl_vat_row, 2).alignment = right
+    ws.cell(mhl_vat_row, 2).border = thin_border
+    vat_cell = ws.cell(mhl_vat_row, 7, round(service2_total * 0.2, 2))
+    vat_cell.font = header_font
+    vat_cell.alignment = right
+    vat_cell.number_format = '#,##0.00'
+    vat_cell.border = thin_border
+
+    # Total with VAT row
+    mhl_total_vat_row = mhl_vat_row + 1
+    ws.cell(mhl_total_vat_row, 2, 'Всього з ПДВ').font = header_font
+    ws.cell(mhl_total_vat_row, 2).alignment = right
+    ws.cell(mhl_total_vat_row, 2).border = thin_border
+    total_vat_cell = ws.cell(mhl_total_vat_row, 7, round(service2_total * 1.2, 2))
+    total_vat_cell.font = header_font
+    total_vat_cell.alignment = right
+    total_vat_cell.number_format = '#,##0.00'
+    total_vat_cell.border = thin_border
+
     # --- Column widths ---
     ws.column_dimensions['A'].width = 8
     ws.column_dimensions['B'].width = 50
@@ -373,6 +523,12 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, executor_name
     for i in range(num_brands):
         ws.column_dimensions[get_column_letter(brand_start_col + i)].width = 12
     ws.column_dimensions[get_column_letter(total_col)].width = 18
+
+    # MHL section column widths
+    ws.column_dimensions['D'].width = 18
+    ws.column_dimensions['E'].width = 22
+    ws.column_dimensions['F'].width = 25
+    ws.column_dimensions['G'].width = 22
 
 
 # ============================================================
@@ -511,7 +667,7 @@ def generate_excel_report(
     ws_zvit_lik = wb.create_sheet(title='звіт викладка+MHL(ЛІК)')
     fill_zvit_worksheet(ws_zvit_lik, pivot_lik, LIK_BRANDS_TEMPLATE, period_str,
                         executor_name, contract_no, contract_date,
-                        service1_lik, service2_lik, is_lic=True)
+                        service1_lik, service2_lik, is_lic=True, mhl_df=mhl_df)
 
     # ============================================================
     # SHEET 4: звіт викладка+MHL(ДД)
@@ -519,7 +675,7 @@ def generate_excel_report(
     ws_zvit_dd = wb.create_sheet(title='звіт викладка+MHL(ДД)')
     fill_zvit_worksheet(ws_zvit_dd, pivot_dd, DD_BRANDS_TEMPLATE, period_str,
                         executor_name, contract_no, contract_date,
-                        service1_dd, service2_dd, is_lic=False)
+                        service1_dd, service2_dd, is_lic=False, mhl_df=mhl_df)
 
     # ============================================================
     # SHEET 5: під час акції (ЛІК) - empty
