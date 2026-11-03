@@ -1,0 +1,5 @@
+pandas
+openpyxl
+num2words
+SQLAlchemy
+pyodbc
