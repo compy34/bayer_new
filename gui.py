@@ -437,7 +437,7 @@ class ReportApp:
         dialog.geometry(f'700x500+{x}+{y}')
 
         # Instructions
-        ttk.Label(dialog, text='Оберіть категорію для кожного невідомого препарата:',
+        ttk.Label(dialog, text='Оберіть категорію для кожного невідомого препарата (дефолт: ЛІК):',
                   font=('TkDefaultFont', 10, 'bold')).pack(pady=10)
 
         # Create treeview for unknown SKUs
@@ -458,28 +458,63 @@ class ReportApp:
         y_scroll.pack(side='right', fill='y', padx=(0, 10), pady=5)
         tree.configure(yscrollcommand=y_scroll.set)
 
-        # Populate with unknown SKUs
+        # Populate with unknown SKUs — default category = ЛІК
         sku_to_brand = {}
         for sku in unknown_skus:
             # Get brand from MHL data
             brand_rows = mhl_data[mhl_data['SKU_UA'] == sku]
             brand = brand_rows['BRAND'].iloc[0] if not brand_rows.empty else 'Невідомий'
             sku_to_brand[sku] = brand
-            tree.insert('', 'end', values=(sku, brand, ''), tags=(sku,))
+            tree.insert('', 'end', values=(sku, brand, 'ЛІК'), tags=(sku,))
 
-        # Store combobox widgets for each row
-        self._sku_comboboxes = {}
-
+        # --- Inline combobox editor for category column ---
         def on_tree_click(event):
+            """Open combobox on single click in Category column."""
             region = tree.identify('region', event.x, event.y)
-            if region == 'cell':
-                column = tree.identify_column(event.x)
-                if column == '#3':  # Category column
-                    item = tree.identify_row(event.y)
-                    if item:
-                        self._edit_category_cell(tree, item)
+            if region != 'cell':
+                return
+            column = tree.identify_column(event.x)
+            if column != '#3':  # Category column
+                return
+            item = tree.identify_row(event.y)
+            if not item:
+                return
+            _open_category_combo(tree, item)
 
-        tree.bind('<Double-1>', on_tree_click)
+        def _open_category_combo(tree, item):
+            """Create and show combobox over the category cell."""
+            bbox = tree.bbox(item, column='#3')
+            if not bbox:
+                return
+            x, y, width, height = bbox
+            current_category = tree.item(item, 'values')[2]
+
+            combo = ttk.Combobox(tree, values=['ЛІК', 'ДД'], state='readonly', width=8)
+            combo.place(x=x, y=y, width=width, height=height)
+            combo.set(current_category if current_category in ('ЛІК', 'ДД') else 'ЛІК')
+            combo.focus_set()
+            # Auto-open dropdown
+            combo.event_generate('<Button-1>')
+
+            def on_select(event=None):
+                new_category = combo.get()
+                if new_category in ('ЛІК', 'ДД'):
+                    values = list(tree.item(item, 'values'))
+                    values[2] = new_category
+                    tree.item(item, values=values)
+                combo.destroy()
+
+            def on_focus_out(event):
+                # Small delay to allow combobox selection to register
+                dialog.after(100, combo.destroy)
+
+            combo.bind('<<ComboboxSelected>>', on_select)
+            combo.bind('<FocusOut>', on_focus_out)
+            combo.bind('<Return>', on_select)
+            combo.bind('<Escape>', lambda e: combo.destroy())
+
+        # Single click to edit category
+        tree.bind('<Button-1>', on_tree_click)
 
         # Buttons frame
         btn_frame = ttk.Frame(dialog)
@@ -504,35 +539,8 @@ class ReportApp:
         ttk.Button(btn_frame, text='Зберегти всі', command=save_all).pack(side='right', padx=5)
         ttk.Button(btn_frame, text='Скасувати', command=dialog.destroy).pack(side='right', padx=5)
 
-    def _edit_category_cell(self, tree, item):
-        """Edit category cell with a combobox."""
-        # Get cell position
-        bbox = tree.bbox(item, column='#3')
-        if not bbox:
-            return
-
-        x, y, width, height = bbox
-        current_category = tree.item(item, 'values')[2]
-
-        # Create combobox
-        combo = ttk.Combobox(tree, values=['ЛІК', 'ДД'], state='readonly', width=8)
-        combo.place(x=x, y=y, width=width, height=height)
-        combo.set(current_category if current_category in ('ЛІК', 'ДД') else '')
-        combo.focus_set()
-
-        def on_select(event=None):
-            new_category = combo.get()
-            if new_category in ('ЛІК', 'ДД'):
-                # Update tree item
-                values = list(tree.item(item, 'values'))
-                values[2] = new_category
-                tree.item(item, values=values)
-            combo.destroy()
-
-        combo.bind('<<ComboboxSelected>>', on_select)
-        combo.bind('<FocusOut>', on_select)
-        combo.bind('<Return>', on_select)
-        combo.bind('<Escape>', lambda e: combo.destroy())
+        # Focus tree for keyboard navigation
+        tree.focus_set()
 
     def manage_sku_active(self):
         """Open dialog to manage SKU active status (include in calculations or not)."""
@@ -562,7 +570,8 @@ class ReportApp:
             return
 
         # Instructions
-        ttk.Label(dialog, text='Керуйте активністю SKU — неактивні SKU не беруть участь у розрахунках MHL та звітах:',
+        ttk.Label(dialog, text='Керуйте активністю SKU — неактивні SKU не беруть участь у розрахунках MHL та звітах.\n'
+                  'Клік по колонці «Активний» або Пробел — переключити статус.',
                   font=('TkDefaultFont', 10, 'bold')).pack(pady=10)
 
         # Search frame
@@ -646,46 +655,48 @@ class ReportApp:
         cat_var.trace('w', on_filter_change)
         status_var.trace('w', on_filter_change)
 
-        # Double-click to toggle active status
-        def on_tree_double_click(event):
-            region = tree.identify('region', event.x, event.y)
-            if region == 'cell':
-                item = tree.identify_row(event.y)
-                if item:
-                    sku = tree.item(item, 'values')[0]
-                    toggle_sku_active(sku)
-
-        tree.bind('<Double-1>', on_tree_double_click)
-
-        # Space key to toggle
-        def on_space(event):
-            item = tree.focus()
-            if item:
-                sku = tree.item(item, 'values')[0]
-                toggle_sku_active(sku)
-
-        tree.bind('<space>', on_space)
-
+        # --- Toggle active status ---
         def toggle_sku_active(sku):
             """Toggle active status for a SKU."""
-            # Find current status
             row = all_skus[all_skus['SKU_UA'] == sku]
             if row.empty:
                 return
             current_active = bool(row.iloc[0]['active'])
             new_active = not current_active
 
-            # Update in database
             if set_sku_active(sku, new_active):
-                # Update local dataframe
                 idx = all_skus.index[all_skus['SKU_UA'] == sku]
                 if len(idx) > 0:
                     all_skus.loc[idx[0], 'active'] = new_active
-                # Refresh tree
                 populate_tree(search_var.get(), cat_var.get(), status_var.get())
                 self.status_var.set(f'Оновлено статус SKU: {sku} → {"Активний" if new_active else "Неактивний"}')
             else:
                 messagebox.showerror('Помилка', f'Не вдалося оновити статус для {sku}')
+
+        # Single-click on ACTIVE column (#4) to toggle
+        def on_tree_click(event):
+            region = tree.identify('region', event.x, event.y)
+            if region != 'cell':
+                return
+            column = tree.identify_column(event.x)
+            if column != '#4':  # ACTIVE column
+                return
+            item = tree.identify_row(event.y)
+            if not item:
+                return
+            sku = tree.item(item, 'values')[0]
+            toggle_sku_active(sku)
+
+        # Space key to toggle focused row
+        def on_space(event):
+            item = tree.focus()
+            if item:
+                sku = tree.item(item, 'values')[0]
+                toggle_sku_active(sku)
+                return 'break'  # prevent default space behavior
+
+        tree.bind('<Button-1>', on_tree_click)
+        tree.bind('<space>', on_space)
 
         # Buttons frame
         btn_frame = ttk.Frame(dialog)
@@ -721,8 +732,10 @@ class ReportApp:
         ttk.Button(btn_frame, text='Деактивувати видимі', command=select_all_inactive).pack(side='left', padx=5)
         ttk.Button(btn_frame, text='Закрити', command=dialog.destroy).pack(side='right', padx=5)
 
-        # Focus search entry
-        search_entry.focus_set()
+        # Focus tree (not search) so Space/Click work immediately
+        tree.focus_set()
+        # But allow Tab to reach search
+        search_entry.bind('<Tab>', lambda e: tree.focus_set() or None)
 
 
 def main():
