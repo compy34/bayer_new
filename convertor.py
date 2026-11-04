@@ -99,7 +99,7 @@ def load_sku_classification():
 
     if not SKU_CLASSIFICATION_FILE.exists():
         # Return empty classification if file doesn't exist
-        _sku_classification_cache = pd.DataFrame(columns=['SKU_UA', 'BRAND', 'CATEGORY'])
+        _sku_classification_cache = pd.DataFrame(columns=['SKU_UA', 'BRAND', 'CATEGORY', 'active'])
         _sku_to_category = {}
         _sku_to_brand = {}
         return _sku_classification_cache
@@ -107,18 +107,27 @@ def load_sku_classification():
     try:
         df = pd.read_csv(SKU_CLASSIFICATION_FILE, dtype=str)
         df.columns = df.columns.str.strip()
+
+        # Ensure 'active' column exists (migration for existing CSV)
+        if 'active' not in df.columns:
+            df['active'] = 'true'
+
+        # Normalize active column to boolean
+        df['active'] = df['active'].fillna('true').astype(str).str.strip().str.lower().isin(['true', '1', 'yes', 'так'])
+
         # Normalize SKU names for matching
         df['SKU_NORMALIZED'] = df['SKU_UA'].fillna('').astype(str).str.strip().str.casefold()
         _sku_classification_cache = df
 
-        # Build lookup dictionaries
-        _sku_to_category = dict(zip(df['SKU_NORMALIZED'], df['CATEGORY']))
-        _sku_to_brand = dict(zip(df['SKU_NORMALIZED'], df['BRAND']))
+        # Build lookup dictionaries (only for active SKUs)
+        active_df = df[df['active']]
+        _sku_to_category = dict(zip(active_df['SKU_NORMALIZED'], active_df['CATEGORY']))
+        _sku_to_brand = dict(zip(active_df['SKU_NORMALIZED'], active_df['BRAND']))
 
         return df
     except Exception as e:
         print(f"Error loading SKU classification: {e}")
-        _sku_classification_cache = pd.DataFrame(columns=['SKU_UA', 'BRAND', 'CATEGORY'])
+        _sku_classification_cache = pd.DataFrame(columns=['SKU_UA', 'BRAND', 'CATEGORY', 'active'])
         _sku_to_category = {}
         _sku_to_brand = {}
         return _sku_classification_cache
@@ -141,19 +150,19 @@ def get_sku_brand(sku_name):
 
 
 def get_mhl_lik_sku():
-    """Get list of LIC SKUs from classification."""
+    """Get list of LIC SKUs from classification (only active)."""
     df = load_sku_classification()
     if df.empty:
         return []
-    return df[df['CATEGORY'] == 'ЛІК']['SKU_UA'].tolist()
+    return df[(df['CATEGORY'] == 'ЛІК') & (df['active'])]['SKU_UA'].tolist()
 
 
 def get_mhl_dd_sku():
-    """Get list of DD SKUs from classification."""
+    """Get list of DD SKUs from classification (only active)."""
     df = load_sku_classification()
     if df.empty:
         return []
-    return df[df['CATEGORY'] == 'ДД']['SKU_UA'].tolist()
+    return df[(df['CATEGORY'] == 'ДД') & (df['active'])]['SKU_UA'].tolist()
 
 
 # For backward compatibility - these are now dynamically loaded
@@ -181,7 +190,7 @@ def _init_legacy_sku_lists():
         MHL_DD_SKU = get_mhl_dd_sku()
 
 
-def save_sku_classification(sku_name, brand, category):
+def save_sku_classification(sku_name, brand, category, active=True):
     """Add or update a SKU classification in the CSV file."""
     import pandas as pd
     import csv
@@ -194,7 +203,8 @@ def save_sku_classification(sku_name, brand, category):
     new_row = {
         'SKU_UA': str(sku_name).strip(),
         'BRAND': str(brand).strip(),
-        'CATEGORY': str(category).strip()
+        'CATEGORY': str(category).strip(),
+        'active': bool(active)
     }
 
     # Update cache
@@ -205,18 +215,21 @@ def save_sku_classification(sku_name, brand, category):
             _sku_classification_cache.loc[idx[0], 'SKU_UA'] = new_row['SKU_UA']
             _sku_classification_cache.loc[idx[0], 'BRAND'] = new_row['BRAND']
             _sku_classification_cache.loc[idx[0], 'CATEGORY'] = new_row['CATEGORY']
+            _sku_classification_cache.loc[idx[0], 'active'] = new_row['active']
     else:
         # Add new
         new_row['SKU_NORMALIZED'] = normalized
         _sku_classification_cache = pd.concat([_sku_classification_cache, pd.DataFrame([new_row])], ignore_index=True)
 
-    _sku_to_category[normalized] = new_row['CATEGORY']
-    _sku_to_brand[normalized] = new_row['BRAND']
+    # Rebuild lookup dictionaries (only active SKUs)
+    active_df = _sku_classification_cache[_sku_classification_cache['active']]
+    _sku_to_category = dict(zip(active_df['SKU_NORMALIZED'], active_df['CATEGORY']))
+    _sku_to_brand = dict(zip(active_df['SKU_NORMALIZED'], active_df['BRAND']))
 
     # Save to CSV with quoting for consistency
     try:
         # Save without the normalized column
-        save_df = _sku_classification_cache[['SKU_UA', 'BRAND', 'CATEGORY']].copy()
+        save_df = _sku_classification_cache[['SKU_UA', 'BRAND', 'CATEGORY', 'active']].copy()
         save_df.to_csv(SKU_CLASSIFICATION_FILE, index=False, encoding='utf-8', quoting=csv.QUOTE_ALL)
         return True
     except Exception as e:
@@ -224,8 +237,49 @@ def save_sku_classification(sku_name, brand, category):
         return False
 
 
+def set_sku_active(sku_name, active=True):
+    """Set the active status of a SKU."""
+    import pandas as pd
+    import csv
+
+    global _sku_classification_cache, _sku_to_category, _sku_to_brand
+
+    load_sku_classification()
+
+    normalized = str(sku_name).strip().casefold()
+
+    # Find and update in cache
+    idx = _sku_classification_cache[_sku_classification_cache['SKU_NORMALIZED'] == normalized].index
+    if len(idx) == 0:
+        return False
+
+    _sku_classification_cache.loc[idx[0], 'active'] = bool(active)
+
+    # Rebuild lookup dictionaries (only active SKUs)
+    active_df = _sku_classification_cache[_sku_classification_cache['active']]
+    _sku_to_category = dict(zip(active_df['SKU_NORMALIZED'], active_df['CATEGORY']))
+    _sku_to_brand = dict(zip(active_df['SKU_NORMALIZED'], active_df['BRAND']))
+
+    # Save to CSV
+    try:
+        save_df = _sku_classification_cache[['SKU_UA', 'BRAND', 'CATEGORY', 'active']].copy()
+        save_df.to_csv(SKU_CLASSIFICATION_FILE, index=False, encoding='utf-8', quoting=csv.QUOTE_ALL)
+        return True
+    except Exception as e:
+        print(f"Error updating SKU active status: {e}")
+        return False
+
+
+def get_all_skus_with_status():
+    """Get all SKUs with their classification and active status for management dialog."""
+    df = load_sku_classification()
+    if df.empty:
+        return pd.DataFrame(columns=['SKU_UA', 'BRAND', 'CATEGORY', 'active'])
+    return df[['SKU_UA', 'BRAND', 'CATEGORY', 'active']].copy()
+
+
 def get_unknown_skus(mhl_df, sku_col='SKU_UA'):
-    """Get unknown SKUs from MHL data that are not in classification."""
+    """Get unknown SKUs from MHL data that are not in classification (only checks active SKUs)."""
     load_sku_classification()
 
     if mhl_df is None or mhl_df.empty or sku_col not in mhl_df.columns:
@@ -336,6 +390,10 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, executor_name
     """Fill звіт викладка+MHL sheet matching template structure exactly.
     Includes MHL data section at the bottom.
     """
+    # Handle None or empty pivot_df - create sheet with headers only
+    if pivot_df is None or pivot_df.empty:
+        pivot_df = pd.DataFrame(columns=['PHARMACY_NAME'] + template_brands)
+
     thin_border = Border(
         left=Side(style='thin'), right=Side(style='thin'),
         top=Side(style='thin'), bottom=Side(style='thin'),

@@ -12,6 +12,8 @@ from convertor import (
     save_sku_classification,
     get_mhl_lik_sku,
     get_mhl_dd_sku,
+    get_all_skus_with_status,
+    set_sku_active,
 )
 from Data.Controller import get_mhl_data, get_pharmacy_data, load_requisites_file
 
@@ -97,6 +99,9 @@ class ReportApp:
         ttk.Button(buttons, text='Класифікувати невідомі SKU', command=self.classify_unknown_skus).pack(
             side='left', padx=(8, 0)
         )
+        ttk.Button(buttons, text='Управління SKU (активність)', command=self.manage_sku_active).pack(
+            side='left', padx=(8, 0)
+        )
         self.load_button = ttk.Button(
             buttons, text='Завантажити дані за період', command=self.load_data
         )
@@ -154,9 +159,6 @@ class ReportApp:
             f'Завантаження даних з БД за період {period[0]} — {period[1]}...'
         )
 
-        # Get selected pharmacy for filtering (always a specific network now)
-        selected_pharmacy = self.pharmacy_name_var.get().strip()
-
         def load():
             data = None
             mhl_data = None
@@ -167,8 +169,8 @@ class ReportApp:
             except (OSError, TypeError, ValueError) as load_error:
                 data_error = load_error
             try:
-                # Pass selected pharmacy to filter MHL data at database level
-                mhl_data = get_mhl_data(*period, chain_name=selected_pharmacy)
+                # Load all MHL data (filtering will be done in Python for flexibility)
+                mhl_data = get_mhl_data(*period)
             except (OSError, TypeError, ValueError) as load_error:
                 mhl_error = load_error
             self.root.after(
@@ -475,7 +477,7 @@ class ReportApp:
                 if column == '#3':  # Category column
                     item = tree.identify_row(event.y)
                     if item:
-                        self._edit_category_cell(tree, item, sku_to_brand)
+                        self._edit_category_cell(tree, item)
 
         tree.bind('<Double-1>', on_tree_click)
 
@@ -502,7 +504,7 @@ class ReportApp:
         ttk.Button(btn_frame, text='Зберегти всі', command=save_all).pack(side='right', padx=5)
         ttk.Button(btn_frame, text='Скасувати', command=dialog.destroy).pack(side='right', padx=5)
 
-    def _edit_category_cell(self, tree, item, sku_to_brand):
+    def _edit_category_cell(self, tree, item):
         """Edit category cell with a combobox."""
         # Get cell position
         bbox = tree.bbox(item, column='#3')
@@ -510,7 +512,6 @@ class ReportApp:
             return
 
         x, y, width, height = bbox
-        sku = tree.item(item, 'values')[0]
         current_category = tree.item(item, 'values')[2]
 
         # Create combobox
@@ -532,6 +533,196 @@ class ReportApp:
         combo.bind('<FocusOut>', on_select)
         combo.bind('<Return>', on_select)
         combo.bind('<Escape>', lambda e: combo.destroy())
+
+    def manage_sku_active(self):
+        """Open dialog to manage SKU active status (include in calculations or not)."""
+        dialog = tk.Toplevel(self.root)
+        dialog.title('Управління активністю SKU')
+        dialog.geometry('900x600')
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        # Center dialog
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() // 2) - (900 // 2)
+        y = (dialog.winfo_screenheight() // 2) - (600 // 2)
+        dialog.geometry(f'900x600+{x}+{y}')
+
+        # Load all SKUs with status
+        try:
+            all_skus = get_all_skus_with_status()
+        except Exception as e:
+            messagebox.showerror('Помилка', f'Не вдалося завантажити SKU: {e}')
+            dialog.destroy()
+            return
+
+        if all_skus.empty:
+            messagebox.showinfo('Інформація', 'Список SKU порожній.')
+            dialog.destroy()
+            return
+
+        # Instructions
+        ttk.Label(dialog, text='Керуйте активністю SKU — неактивні SKU не беруть участь у розрахунках MHL та звітах:',
+                  font=('TkDefaultFont', 10, 'bold')).pack(pady=10)
+
+        # Search frame
+        search_frame = ttk.Frame(dialog)
+        search_frame.pack(fill='x', padx=10, pady=5)
+
+        ttk.Label(search_frame, text='Пошук:').pack(side='left', padx=(0, 5))
+        search_var = tk.StringVar()
+        search_entry = ttk.Entry(search_frame, textvariable=search_var, width=40)
+        search_entry.pack(side='left', padx=(0, 10))
+
+        # Filter by category
+        ttk.Label(search_frame, text='Категорія:').pack(side='left', padx=(10, 5))
+        cat_var = tk.StringVar(value='Всі')
+        cat_combo = ttk.Combobox(search_frame, textvariable=cat_var, values=['Всі', 'ЛІК', 'ДД'], state='readonly', width=10)
+        cat_combo.pack(side='left', padx=(0, 10))
+
+        # Filter by active status
+        ttk.Label(search_frame, text='Статус:').pack(side='left', padx=(10, 5))
+        status_var = tk.StringVar(value='Всі')
+        status_combo = ttk.Combobox(search_frame, textvariable=status_var, values=['Всі', 'Активні', 'Неактивні'], state='readonly', width=12)
+        status_combo.pack(side='left', padx=(0, 10))
+
+        # Create treeview
+        columns = ['SKU_UA', 'BRAND', 'CATEGORY', 'ACTIVE']
+        tree = ttk.Treeview(dialog, columns=columns, show='headings', height=20)
+        tree.pack(fill='both', expand=True, padx=10, pady=5)
+
+        tree.heading('SKU_UA', text='Назва препарату (SKU)')
+        tree.heading('BRAND', text='Бренд')
+        tree.heading('CATEGORY', text='Категорія')
+        tree.heading('ACTIVE', text='Активний')
+
+        tree.column('SKU_UA', width=350, minwidth=250)
+        tree.column('BRAND', width=180, minwidth=120)
+        tree.column('CATEGORY', width=80, minwidth=60, anchor='center')
+        tree.column('ACTIVE', width=80, minwidth=60, anchor='center')
+
+        # Scrollbars
+        y_scroll = ttk.Scrollbar(dialog, orient='vertical', command=tree.yview)
+        y_scroll.pack(side='right', fill='y', padx=(0, 10), pady=5)
+        x_scroll = ttk.Scrollbar(dialog, orient='horizontal', command=tree.xview)
+        x_scroll.pack(side='bottom', fill='x', padx=10, pady=(0, 5))
+        tree.configure(yscrollcommand=y_scroll.set, xscrollcommand=x_scroll.set)
+
+        # Store reference to data for filtering
+        self._sku_all_data = all_skus
+
+        def populate_tree(filter_text='', filter_cat='Всі', filter_status='Всі'):
+            """Populate tree with filtered data."""
+            tree.delete(*tree.get_children())
+            filter_text = filter_text.strip().casefold()
+
+            for _, row in all_skus.iterrows():
+                sku = str(row['SKU_UA'])
+                brand = str(row['BRAND'])
+                cat = str(row['CATEGORY'])
+                active = bool(row['active'])
+
+                # Apply filters
+                if filter_text and filter_text not in sku.casefold() and filter_text not in brand.casefold():
+                    continue
+                if filter_cat != 'Всі' and cat != filter_cat:
+                    continue
+                if filter_status == 'Активні' and not active:
+                    continue
+                if filter_status == 'Неактивні' and active:
+                    continue
+
+                active_str = '✓' if active else '✗'
+                tree.insert('', 'end', values=(sku, brand, cat, active_str), tags=(sku,))
+
+        # Initial populate
+        populate_tree()
+
+        # Filter functions
+        def on_filter_change(*args):
+            populate_tree(search_var.get(), cat_var.get(), status_var.get())
+
+        search_var.trace('w', on_filter_change)
+        cat_var.trace('w', on_filter_change)
+        status_var.trace('w', on_filter_change)
+
+        # Double-click to toggle active status
+        def on_tree_double_click(event):
+            region = tree.identify('region', event.x, event.y)
+            if region == 'cell':
+                item = tree.identify_row(event.y)
+                if item:
+                    sku = tree.item(item, 'values')[0]
+                    toggle_sku_active(sku)
+
+        tree.bind('<Double-1>', on_tree_double_click)
+
+        # Space key to toggle
+        def on_space(event):
+            item = tree.focus()
+            if item:
+                sku = tree.item(item, 'values')[0]
+                toggle_sku_active(sku)
+
+        tree.bind('<space>', on_space)
+
+        def toggle_sku_active(sku):
+            """Toggle active status for a SKU."""
+            # Find current status
+            row = all_skus[all_skus['SKU_UA'] == sku]
+            if row.empty:
+                return
+            current_active = bool(row.iloc[0]['active'])
+            new_active = not current_active
+
+            # Update in database
+            if set_sku_active(sku, new_active):
+                # Update local dataframe
+                idx = all_skus.index[all_skus['SKU_UA'] == sku]
+                if len(idx) > 0:
+                    all_skus.loc[idx[0], 'active'] = new_active
+                # Refresh tree
+                populate_tree(search_var.get(), cat_var.get(), status_var.get())
+                self.status_var.set(f'Оновлено статус SKU: {sku} → {"Активний" if new_active else "Неактивний"}')
+            else:
+                messagebox.showerror('Помилка', f'Не вдалося оновити статус для {sku}')
+
+        # Buttons frame
+        btn_frame = ttk.Frame(dialog)
+        btn_frame.pack(fill='x', padx=10, pady=10)
+
+        def select_all_active():
+            """Set all visible SKUs to active."""
+            visible_skus = [tree.item(item, 'values')[0] for item in tree.get_children()]
+            count = 0
+            for sku in visible_skus:
+                if set_sku_active(sku, True):
+                    idx = all_skus.index[all_skus['SKU_UA'] == sku]
+                    if len(idx) > 0:
+                        all_skus.loc[idx[0], 'active'] = True
+                    count += 1
+            populate_tree(search_var.get(), cat_var.get(), status_var.get())
+            self.status_var.set(f'Активовано SKU: {count}')
+
+        def select_all_inactive():
+            """Set all visible SKUs to inactive."""
+            visible_skus = [tree.item(item, 'values')[0] for item in tree.get_children()]
+            count = 0
+            for sku in visible_skus:
+                if set_sku_active(sku, False):
+                    idx = all_skus.index[all_skus['SKU_UA'] == sku]
+                    if len(idx) > 0:
+                        all_skus.loc[idx[0], 'active'] = False
+                    count += 1
+            populate_tree(search_var.get(), cat_var.get(), status_var.get())
+            self.status_var.set(f'Деактивовано SKU: {count}')
+
+        ttk.Button(btn_frame, text='Активувати видимі', command=select_all_active).pack(side='left', padx=5)
+        ttk.Button(btn_frame, text='Деактивувати видимі', command=select_all_inactive).pack(side='left', padx=5)
+        ttk.Button(btn_frame, text='Закрити', command=dialog.destroy).pack(side='right', padx=5)
+
+        # Focus search entry
+        search_entry.focus_set()
 
 
 def main():
