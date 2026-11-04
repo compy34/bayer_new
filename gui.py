@@ -686,9 +686,9 @@ class ReportApp:
         def on_status_change(*_):
             populate_tree(search_var.get(), cat_var.get(), status_var.get())
 
-        search_var.trace('w', on_search_change)
-        cat_var.trace('w', on_cat_change)
-        status_var.trace('w', on_status_change)
+        search_var.trace_add('write', on_search_change)
+        cat_var.trace_add('write', on_cat_change)
+        status_var.trace_add('write', on_status_change)
 
         # --- Toggle active status ---
         def toggle_selected_sku():
