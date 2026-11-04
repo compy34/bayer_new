@@ -426,24 +426,37 @@ class ReportApp:
         """Show dialog to classify unknown SKUs."""
         dialog = tk.Toplevel(self.root)
         dialog.title('Класифікація невідомих SKU')
-        dialog.geometry('700x500')
         dialog.transient(self.root)
         dialog.grab_set()
+        dialog.minsize(600, 400)  # Prevent squishing on Windows
 
-        # Center dialog
-        dialog.update_idletasks()
-        x = (dialog.winfo_screenwidth() // 2) - (700 // 2)
-        y = (dialog.winfo_screenheight() // 2) - (500 // 2)
-        dialog.geometry(f'700x500+{x}+{y}')
+        # Center dialog - use after() to ensure proper sizing
+        def center_dialog():
+            dialog.update_idletasks()
+            w, h = 700, 500
+            x = (dialog.winfo_screenwidth() // 2) - (w // 2)
+            y = (dialog.winfo_screenheight() // 2) - (h // 2)
+            dialog.geometry(f'{w}x{h}+{x}+{y}')
 
-        # Instructions
+        dialog.after(1, center_dialog)
+
+        # === MAIN LAYOUT using grid ===
+        dialog.columnconfigure(0, weight=1)
+        dialog.rowconfigure(1, weight=1)  # Tree area expands
+
+        # Row 0: Instructions
         ttk.Label(dialog, text='Оберіть категорію для кожного невідомого препарата (дефолт: ЛІК):',
-                  font=('TkDefaultFont', 10, 'bold')).pack(pady=10)
+                  font=('TkDefaultFont', 10, 'bold')).grid(row=0, column=0, sticky='ew', padx=10, pady=(10, 5))
 
-        # Create treeview for unknown SKUs
+        # Row 1: Tree + Scrollbars in container frame (expands)
+        tree_container = ttk.Frame(dialog)
+        tree_container.grid(row=1, column=0, sticky='nsew', padx=10, pady=5)
+        tree_container.columnconfigure(0, weight=1)
+        tree_container.rowconfigure(0, weight=1)
+
         columns = ['SKU_UA', 'BRAND', 'Категорія']
-        tree = ttk.Treeview(dialog, columns=columns, show='headings', height=15)
-        tree.pack(fill='both', expand=True, padx=10, pady=5)
+        tree = ttk.Treeview(tree_container, columns=columns, show='headings', height=15)
+        tree.grid(row=0, column=0, sticky='nsew')
 
         tree.heading('SKU_UA', text='Назва препарату (SKU)')
         tree.heading('BRAND', text='Бренд')
@@ -453,9 +466,9 @@ class ReportApp:
         tree.column('BRAND', width=150, minwidth=100)
         tree.column('Категорія', width=100, minwidth=80, anchor='center')
 
-        # Scrollbars
-        y_scroll = ttk.Scrollbar(dialog, orient='vertical', command=tree.yview)
-        y_scroll.pack(side='right', fill='y', padx=(0, 10), pady=5)
+        # Scrollbars INSIDE tree_container
+        y_scroll = ttk.Scrollbar(tree_container, orient='vertical', command=tree.yview)
+        y_scroll.grid(row=0, column=1, sticky='ns')
         tree.configure(yscrollcommand=y_scroll.set)
 
         # Populate with unknown SKUs — default category = ЛІК
@@ -516,9 +529,9 @@ class ReportApp:
         # Single click to edit category
         tree.bind('<Button-1>', on_tree_click)
 
-        # Buttons frame
+        # Row 2: Buttons frame (fixed at bottom)
         btn_frame = ttk.Frame(dialog)
-        btn_frame.pack(fill='x', padx=10, pady=10)
+        btn_frame.grid(row=2, column=0, sticky='ew', padx=10, pady=10)
 
         def save_all():
             saved_count = 0
@@ -546,15 +559,19 @@ class ReportApp:
         """Open dialog to manage SKU active status (include in calculations or not)."""
         dialog = tk.Toplevel(self.root)
         dialog.title('Управління активністю SKU')
-        dialog.geometry('900x600')
         dialog.transient(self.root)
         dialog.grab_set()
+        dialog.minsize(800, 500)  # Prevent squishing on Windows
 
-        # Center dialog
-        dialog.update_idletasks()
-        x = (dialog.winfo_screenwidth() // 2) - (900 // 2)
-        y = (dialog.winfo_screenheight() // 2) - (600 // 2)
-        dialog.geometry(f'900x600+{x}+{y}')
+        # Center dialog - use after() to ensure proper sizing
+        def center_dialog():
+            dialog.update_idletasks()
+            w, h = 900, 600
+            x = (dialog.winfo_screenwidth() // 2) - (w // 2)
+            y = (dialog.winfo_screenheight() // 2) - (h // 2)
+            dialog.geometry(f'{w}x{h}+{x}+{y}')
+
+        dialog.after(1, center_dialog)
 
         # Load all SKUs with status
         try:
@@ -569,36 +586,44 @@ class ReportApp:
             dialog.destroy()
             return
 
-        # Instructions
+        # === MAIN LAYOUT using grid for predictable positioning ===
+        dialog.columnconfigure(0, weight=1)
+        dialog.rowconfigure(2, weight=1)  # Tree area expands
+
+        # Row 0: Instructions
         ttk.Label(dialog, text='Керуйте активністю SKU — неактивні SKU не беруть участь у розрахунках MHL та звітах.\n'
                   'Подвійний клік по рядку / Пробел / кнопка «Переключити» — змінити статус.',
-                  font=('TkDefaultFont', 10, 'bold')).pack(pady=10)
+                  font=('TkDefaultFont', 10, 'bold')).grid(row=0, column=0, sticky='ew', padx=10, pady=(10, 5))
 
-        # Search frame
+        # Row 1: Search/Filter frame
         search_frame = ttk.Frame(dialog)
-        search_frame.pack(fill='x', padx=10, pady=5)
+        search_frame.grid(row=1, column=0, sticky='ew', padx=10, pady=5)
+        search_frame.columnconfigure(1, weight=1)  # Search entry expands
 
-        ttk.Label(search_frame, text='Пошук:').pack(side='left', padx=(0, 5))
+        ttk.Label(search_frame, text='Пошук:').grid(row=0, column=0, padx=(0, 5), sticky='w')
         search_var = tk.StringVar()
         search_entry = ttk.Entry(search_frame, textvariable=search_var, width=40)
-        search_entry.pack(side='left', padx=(0, 10))
+        search_entry.grid(row=0, column=1, padx=(0, 10), sticky='ew')
 
-        # Filter by category
-        ttk.Label(search_frame, text='Категорія:').pack(side='left', padx=(10, 5))
+        ttk.Label(search_frame, text='Категорія:').grid(row=0, column=2, padx=(10, 5), sticky='w')
         cat_var = tk.StringVar(value='Всі')
         cat_combo = ttk.Combobox(search_frame, textvariable=cat_var, values=['Всі', 'ЛІК', 'ДД'], state='readonly', width=10)
-        cat_combo.pack(side='left', padx=(0, 10))
+        cat_combo.grid(row=0, column=3, padx=(0, 10), sticky='w')
 
-        # Filter by active status
-        ttk.Label(search_frame, text='Статус:').pack(side='left', padx=(10, 5))
+        ttk.Label(search_frame, text='Статус:').grid(row=0, column=4, padx=(10, 5), sticky='w')
         status_var = tk.StringVar(value='Всі')
         status_combo = ttk.Combobox(search_frame, textvariable=status_var, values=['Всі', 'Активні', 'Неактивні'], state='readonly', width=12)
-        status_combo.pack(side='left', padx=(0, 10))
+        status_combo.grid(row=0, column=5, padx=(0, 10), sticky='w')
 
-        # Create treeview
+        # Row 2: Tree + Scrollbars in a container frame (expands)
+        tree_container = ttk.Frame(dialog)
+        tree_container.grid(row=2, column=0, sticky='nsew', padx=10, pady=5)
+        tree_container.columnconfigure(0, weight=1)
+        tree_container.rowconfigure(0, weight=1)
+
         columns = ['SKU_UA', 'BRAND', 'CATEGORY', 'ACTIVE']
-        tree = ttk.Treeview(dialog, columns=columns, show='headings', height=20, selectmode='browse')
-        tree.pack(fill='both', expand=True, padx=10, pady=5)
+        tree = ttk.Treeview(tree_container, columns=columns, show='headings', height=20, selectmode='browse')
+        tree.grid(row=0, column=0, sticky='nsew')
 
         tree.heading('SKU_UA', text='Назва препарату (SKU)')
         tree.heading('BRAND', text='Бренд')
@@ -610,12 +635,16 @@ class ReportApp:
         tree.column('CATEGORY', width=80, minwidth=60, anchor='center')
         tree.column('ACTIVE', width=80, minwidth=60, anchor='center')
 
-        # Scrollbars
-        y_scroll = ttk.Scrollbar(dialog, orient='vertical', command=tree.yview)
-        y_scroll.pack(side='right', fill='y', padx=(0, 10), pady=5)
-        x_scroll = ttk.Scrollbar(dialog, orient='horizontal', command=tree.xview)
-        x_scroll.pack(side='bottom', fill='x', padx=10, pady=(0, 5))
+        # Scrollbars INSIDE tree_container (not on dialog)
+        y_scroll = ttk.Scrollbar(tree_container, orient='vertical', command=tree.yview)
+        y_scroll.grid(row=0, column=1, sticky='ns')
+        x_scroll = ttk.Scrollbar(tree_container, orient='horizontal', command=tree.xview)
+        x_scroll.grid(row=1, column=0, sticky='ew')
         tree.configure(yscrollcommand=y_scroll.set, xscrollcommand=x_scroll.set)
+
+        # Row 3: Buttons frame (fixed at bottom, never pushed out)
+        btn_frame = ttk.Frame(dialog)
+        btn_frame.grid(row=3, column=0, sticky='ew', padx=10, pady=10)
 
         # Store reference to data for filtering
         self._sku_all_data = all_skus
@@ -647,7 +676,7 @@ class ReportApp:
         # Initial populate
         populate_tree()
 
-        # Filter functions - use lambda to capture current values
+        # Filter functions
         def on_search_change(*_):
             populate_tree(search_var.get(), cat_var.get(), status_var.get())
 
@@ -702,10 +731,7 @@ class ReportApp:
         # Also allow Enter key
         tree.bind('<Return>', on_space)
 
-        # Buttons frame
-        btn_frame = ttk.Frame(dialog)
-        btn_frame.pack(fill='x', padx=10, pady=10)
-
+        # Button callbacks
         def select_all_active():
             """Set all visible SKUs to active."""
             visible_skus = [tree.item(item, 'values')[0] for item in tree.get_children()]
