@@ -8,6 +8,10 @@ from convertor import (
     generate_excel_report,
     mhl_brand_counts,
     mhl_unknown_samples,
+    get_unknown_skus,
+    save_sku_classification,
+    get_mhl_lik_sku,
+    get_mhl_dd_sku,
 )
 from Data.Controller import get_mhl_data, get_pharmacy_data, load_requisites_file
 
@@ -89,6 +93,9 @@ class ReportApp:
         )
         ttk.Button(buttons, text='Завантажити Excel', command=self.download).pack(
             side='left'
+        )
+        ttk.Button(buttons, text='Класифікувати невідомі SKU', command=self.classify_unknown_skus).pack(
+            side='left', padx=(8, 0)
         )
         self.load_button = ttk.Button(
             buttons, text='Завантажити дані за період', command=self.load_data
@@ -387,6 +394,144 @@ class ReportApp:
 
         self.status_var.set(f'Звіт збережено: {filename}')
         messagebox.showinfo('Успіх', f'Файл успішно збережено:\n{filename}')
+
+    def classify_unknown_skus(self):
+        """Open dialog to classify unknown SKUs from MHL data."""
+        if self.df_mhl is None or self.df_mhl.empty:
+            messagebox.showwarning('Попередження', 'Спочатку завантажте дані MHL.')
+            return
+
+        # Get filtered MHL data for current network selection
+        try:
+            mhl_data = self._filtered_mhl_data()
+        except Exception as e:
+            messagebox.showerror('Помилка', f'Помилка фільтрації MHL даних: {e}')
+            return
+
+        if mhl_data is None or mhl_data.empty:
+            messagebox.showinfo('Інформація', 'Немає даних MHL для вибраної мережі.')
+            return
+
+        unknown_skus = get_unknown_skus(mhl_data)
+        if not unknown_skus:
+            messagebox.showinfo('Інформація', 'Невідомих SKU не знайдено. Усі препарати уже класифіковані.')
+            return
+
+        # Create classification dialog
+        self._show_classification_dialog(unknown_skus, mhl_data)
+
+    def _show_classification_dialog(self, unknown_skus, mhl_data):
+        """Show dialog to classify unknown SKUs."""
+        dialog = tk.Toplevel(self.root)
+        dialog.title('Класифікація невідомих SKU')
+        dialog.geometry('700x500')
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        # Center dialog
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() // 2) - (700 // 2)
+        y = (dialog.winfo_screenheight() // 2) - (500 // 2)
+        dialog.geometry(f'700x500+{x}+{y}')
+
+        # Instructions
+        ttk.Label(dialog, text='Оберіть категорію для кожного невідомого препарата:',
+                  font=('TkDefaultFont', 10, 'bold')).pack(pady=10)
+
+        # Create treeview for unknown SKUs
+        columns = ['SKU_UA', 'BRAND', 'Категорія']
+        tree = ttk.Treeview(dialog, columns=columns, show='headings', height=15)
+        tree.pack(fill='both', expand=True, padx=10, pady=5)
+
+        tree.heading('SKU_UA', text='Назва препарату (SKU)')
+        tree.heading('BRAND', text='Бренд')
+        tree.heading('Категорія', text='Категорія')
+
+        tree.column('SKU_UA', width=300, minwidth=200)
+        tree.column('BRAND', width=150, minwidth=100)
+        tree.column('Категорія', width=100, minwidth=80, anchor='center')
+
+        # Scrollbars
+        y_scroll = ttk.Scrollbar(dialog, orient='vertical', command=tree.yview)
+        y_scroll.pack(side='right', fill='y', padx=(0, 10), pady=5)
+        tree.configure(yscrollcommand=y_scroll.set)
+
+        # Populate with unknown SKUs
+        sku_to_brand = {}
+        for sku in unknown_skus:
+            # Get brand from MHL data
+            brand_rows = mhl_data[mhl_data['SKU_UA'] == sku]
+            brand = brand_rows['BRAND'].iloc[0] if not brand_rows.empty else 'Невідомий'
+            sku_to_brand[sku] = brand
+            tree.insert('', 'end', values=(sku, brand, ''), tags=(sku,))
+
+        # Store combobox widgets for each row
+        self._sku_comboboxes = {}
+
+        def on_tree_click(event):
+            region = tree.identify('region', event.x, event.y)
+            if region == 'cell':
+                column = tree.identify_column(event.x)
+                if column == '#3':  # Category column
+                    item = tree.identify_row(event.y)
+                    if item:
+                        self._edit_category_cell(tree, item, sku_to_brand)
+
+        tree.bind('<Double-1>', on_tree_click)
+
+        # Buttons frame
+        btn_frame = ttk.Frame(dialog)
+        btn_frame.pack(fill='x', padx=10, pady=10)
+
+        def save_all():
+            saved_count = 0
+            for item in tree.get_children():
+                values = tree.item(item, 'values')
+                sku = values[0]
+                brand = values[1]
+                category = values[2]
+                if category and category in ('ЛІК', 'ДД'):
+                    if save_sku_classification(sku, brand, category):
+                        saved_count += 1
+            if saved_count > 0:
+                messagebox.showinfo('Успіх', f'Збережено класифікацій: {saved_count}')
+                dialog.destroy()
+            else:
+                messagebox.showwarning('Попередження', 'Не обрано категорію для жодного препарату.')
+
+        ttk.Button(btn_frame, text='Зберегти всі', command=save_all).pack(side='right', padx=5)
+        ttk.Button(btn_frame, text='Скасувати', command=dialog.destroy).pack(side='right', padx=5)
+
+    def _edit_category_cell(self, tree, item, sku_to_brand):
+        """Edit category cell with a combobox."""
+        # Get cell position
+        bbox = tree.bbox(item, column='#3')
+        if not bbox:
+            return
+
+        x, y, width, height = bbox
+        sku = tree.item(item, 'values')[0]
+        current_category = tree.item(item, 'values')[2]
+
+        # Create combobox
+        combo = ttk.Combobox(tree, values=['ЛІК', 'ДД'], state='readonly', width=8)
+        combo.place(x=x, y=y, width=width, height=height)
+        combo.set(current_category if current_category in ('ЛІК', 'ДД') else '')
+        combo.focus_set()
+
+        def on_select(event=None):
+            new_category = combo.get()
+            if new_category in ('ЛІК', 'ДД'):
+                # Update tree item
+                values = list(tree.item(item, 'values'))
+                values[2] = new_category
+                tree.item(item, values=values)
+            combo.destroy()
+
+        combo.bind('<<ComboboxSelected>>', on_select)
+        combo.bind('<FocusOut>', on_select)
+        combo.bind('<Return>', on_select)
+        combo.bind('<Escape>', lambda e: combo.destroy())
 
 
 def main():

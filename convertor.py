@@ -75,42 +75,172 @@ SERVICE_PRICES = {
     'Бепантен Сенсідерм-2': 800.0,
 }
 
-# MHL SKU lists for filtering MHL data
-MHL_LIK_SKU = [
-    'Еріус сироп 0.5 мг/мл 60мл',
-    'Еріус таблетки 5 мг № 10',
-    'Антифлу Кідс, порошок пакетики №5',
-    'Аспірин С, таб. № 10',
-    'Кальцемін Адванс №60',
-    'Кальцемін Сільвер №60',
-    'Бепантен, крем 5%, туба 30г №1',
-    'Бепантен, мазь 5%, туба 30г №1',
-    'Бепантен, мазь 5%, туба 100г №1',
-    'Бепантен Плюс, крем, туба 30г №1',
-    'Елевіт Пронаталь, т.в/о №100',
-    'Реліф, супозиторїї ректальні №12',
-    'Реліф Адванс, супозиторїї ректальні №12',
-    'Реліф Про, супозиторїї ректальні №10',
-    'Реліф Ультра, супозиторїї ректальні №12',
-    'Ренні, табл. жув., мент. смак. №24',
-    "Ренні б/ц м'ятні,табл. жув.№24",
-    'Ренні з апельсиновим смаком, табл. жув. №24',
-    'Тералів, табл. 220мг №12',
-    'Терафлекс, капсули №60',
-    'Терафлекс Адванс, капсули №60',
-    'Терафлекс, капсули №120',
-]
+# ============================================================
+# SKU CLASSIFICATION CONFIG (loaded from CSV)
+# ============================================================
 
-MHL_DD_SKU = [
-    'Супрадин Актив, табл. №30',
-    'Супрадин Актив, табл. шип., №15',
-    'Супрадин Ведмежуйки №30',
-    'Супрадин Ведмежуйки №60',
-    'Супрадин Бустер, табл. шип., №15',
-    'Бепантен Сенсідерм',
-    'Елевіт-Комплекс 2, капс. № 30',
-    'Елевіт-Комплекс 3, капс. № 30',
-]
+from pathlib import Path
+
+SKU_CLASSIFICATION_FILE = Path(__file__).resolve().parent / 'sku_classification.csv'
+
+_sku_classification_cache = None
+_sku_to_category = None
+_sku_to_brand = None
+
+
+def load_sku_classification():
+    """Load SKU classification from CSV file."""
+    global _sku_classification_cache, _sku_to_category, _sku_to_brand
+
+    if _sku_classification_cache is not None:
+        return _sku_classification_cache
+
+    import pandas as pd
+
+    if not SKU_CLASSIFICATION_FILE.exists():
+        # Return empty classification if file doesn't exist
+        _sku_classification_cache = pd.DataFrame(columns=['SKU_UA', 'BRAND', 'CATEGORY'])
+        _sku_to_category = {}
+        _sku_to_brand = {}
+        return _sku_classification_cache
+
+    try:
+        df = pd.read_csv(SKU_CLASSIFICATION_FILE, dtype=str)
+        df.columns = df.columns.str.strip()
+        # Normalize SKU names for matching
+        df['SKU_NORMALIZED'] = df['SKU_UA'].fillna('').astype(str).str.strip().str.casefold()
+        _sku_classification_cache = df
+
+        # Build lookup dictionaries
+        _sku_to_category = dict(zip(df['SKU_NORMALIZED'], df['CATEGORY']))
+        _sku_to_brand = dict(zip(df['SKU_NORMALIZED'], df['BRAND']))
+
+        return df
+    except Exception as e:
+        print(f"Error loading SKU classification: {e}")
+        _sku_classification_cache = pd.DataFrame(columns=['SKU_UA', 'BRAND', 'CATEGORY'])
+        _sku_to_category = {}
+        _sku_to_brand = {}
+        return _sku_classification_cache
+
+
+def get_sku_category(sku_name):
+    """Get category (ЛІК/ДД) for a SKU name."""
+    if _sku_to_category is None:
+        load_sku_classification()
+    normalized = str(sku_name).strip().casefold()
+    return _sku_to_category.get(normalized)
+
+
+def get_sku_brand(sku_name):
+    """Get template brand for a SKU name."""
+    if _sku_to_brand is None:
+        load_sku_classification()
+    normalized = str(sku_name).strip().casefold()
+    return _sku_to_brand.get(normalized)
+
+
+def get_mhl_lik_sku():
+    """Get list of LIC SKUs from classification."""
+    df = load_sku_classification()
+    if df.empty:
+        return []
+    return df[df['CATEGORY'] == 'ЛІК']['SKU_UA'].tolist()
+
+
+def get_mhl_dd_sku():
+    """Get list of DD SKUs from classification."""
+    df = load_sku_classification()
+    if df.empty:
+        return []
+    return df[df['CATEGORY'] == 'ДД']['SKU_UA'].tolist()
+
+
+# For backward compatibility - these are now dynamically loaded
+def get_mhl_lik_sku_list():
+    """Backward compatible function returning LIC SKU list."""
+    return get_mhl_lik_sku()
+
+
+def get_mhl_dd_sku_list():
+    """Backward compatible function returning DD SKU list."""
+    return get_mhl_dd_sku()
+
+
+# Legacy constants (populated on first access)
+MHL_LIK_SKU = []
+MHL_DD_SKU = []
+
+
+def _init_legacy_sku_lists():
+    """Initialize legacy SKU lists for backward compatibility."""
+    global MHL_LIK_SKU, MHL_DD_SKU
+    if not MHL_LIK_SKU:
+        MHL_LIK_SKU = get_mhl_lik_sku()
+    if not MHL_DD_SKU:
+        MHL_DD_SKU = get_mhl_dd_sku()
+
+
+def save_sku_classification(sku_name, brand, category):
+    """Add or update a SKU classification in the CSV file."""
+    import pandas as pd
+    import csv
+
+    global _sku_classification_cache, _sku_to_category, _sku_to_brand
+
+    load_sku_classification()  # Ensure cache is loaded
+
+    normalized = str(sku_name).strip().casefold()
+    new_row = {
+        'SKU_UA': str(sku_name).strip(),
+        'BRAND': str(brand).strip(),
+        'CATEGORY': str(category).strip()
+    }
+
+    # Update cache
+    if normalized in _sku_to_category:
+        # Update existing
+        idx = _sku_classification_cache[_sku_classification_cache['SKU_NORMALIZED'] == normalized].index
+        if len(idx) > 0:
+            _sku_classification_cache.loc[idx[0], 'SKU_UA'] = new_row['SKU_UA']
+            _sku_classification_cache.loc[idx[0], 'BRAND'] = new_row['BRAND']
+            _sku_classification_cache.loc[idx[0], 'CATEGORY'] = new_row['CATEGORY']
+    else:
+        # Add new
+        new_row['SKU_NORMALIZED'] = normalized
+        _sku_classification_cache = pd.concat([_sku_classification_cache, pd.DataFrame([new_row])], ignore_index=True)
+
+    _sku_to_category[normalized] = new_row['CATEGORY']
+    _sku_to_brand[normalized] = new_row['BRAND']
+
+    # Save to CSV with quoting for consistency
+    try:
+        # Save without the normalized column
+        save_df = _sku_classification_cache[['SKU_UA', 'BRAND', 'CATEGORY']].copy()
+        save_df.to_csv(SKU_CLASSIFICATION_FILE, index=False, encoding='utf-8', quoting=csv.QUOTE_ALL)
+        return True
+    except Exception as e:
+        print(f"Error saving SKU classification: {e}")
+        return False
+
+
+def get_unknown_skus(mhl_df, sku_col='SKU_UA'):
+    """Get unknown SKUs from MHL data that are not in classification."""
+    load_sku_classification()
+
+    if mhl_df is None or mhl_df.empty or sku_col not in mhl_df.columns:
+        return []
+
+    known_skus = set(_sku_to_category.keys())
+    mhl_skus = mhl_df[sku_col].fillna('').astype(str).str.strip().str.casefold()
+    unknown_mask = ~mhl_skus.isin(known_skus) & (mhl_skus != '')
+
+    unknown_df = mhl_df[unknown_mask].drop_duplicates(subset=[sku_col])
+    return unknown_df[sku_col].unique().tolist()
+
+
+# Initialize legacy lists on module import
+_init_legacy_sku_lists()
 
 
 # ============================================================
@@ -176,9 +306,10 @@ def get_mhl_availability_sum(mhl_df, template_brands):
     work_df = mhl_df.copy()
     sku_col = 'SKU_UA' if 'SKU_UA' in work_df.columns else 'Назва товару'
 
-    # Filter MHL data for relevant SKUs
+    # Filter MHL data for relevant SKUs using dynamic classification
     is_lic = template_brands == LIK_BRANDS_TEMPLATE
-    allowed_values = {str(v).strip().casefold() for v in (MHL_LIK_SKU if is_lic else MHL_DD_SKU)}
+    allowed_skus = get_mhl_lik_sku() if is_lic else get_mhl_dd_sku()
+    allowed_values = {str(v).strip().casefold() for v in allowed_skus}
     sku_values = work_df[sku_col].fillna('').astype(str).str.strip().str.casefold()
     work_df = work_df[sku_values.isin(allowed_values)].copy()
 
@@ -402,7 +533,8 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, executor_name
         sku_col = 'SKU_UA' if 'SKU_UA' in work_df.columns else 'Назва товару'
 
         is_lic_category = template_brands == LIK_BRANDS_TEMPLATE
-        allowed_values = {str(v).strip().casefold() for v in (MHL_LIK_SKU if is_lic_category else MHL_DD_SKU)}
+        allowed_skus = get_mhl_lik_sku() if is_lic_category else get_mhl_dd_sku()
+        allowed_values = {str(v).strip().casefold() for v in allowed_skus}
         sku_values = work_df[sku_col].fillna('').astype(str).str.strip().str.casefold()
         work_df = work_df[sku_values.isin(allowed_values)].copy()
 
@@ -765,13 +897,17 @@ def build_report_dataframe(df):
 
 def mhl_brand_counts(df):
     """Return category counts for diagnostics before Excel generation."""
-    if df is None or df.empty or 'BRAND' not in df.columns:
+    if df is None or df.empty or 'SKU_UA' not in df.columns:
         return 0, 0, 0
+
+    load_sku_classification()
     sku_names = df['SKU_UA'].fillna('').astype(str).str.strip().str.casefold()
-    lik = {str(value).strip().casefold() for value in MHL_LIK_SKU}
-    dd = {str(value).strip().casefold() for value in MHL_DD_SKU}
-    lik_match = sku_names.isin(lik)
-    dd_match = sku_names.isin(dd)
+
+    lik_skus = {str(v).strip().casefold() for v in get_mhl_lik_sku()}
+    dd_skus = {str(v).strip().casefold() for v in get_mhl_dd_sku()}
+
+    lik_match = sku_names.isin(lik_skus)
+    dd_match = sku_names.isin(dd_skus)
     return int(lik_match.sum()), int(dd_match.sum()), int(
         (~(lik_match | dd_match)).sum()
     )
@@ -781,11 +917,11 @@ def mhl_unknown_samples(df, limit=8):
     """Return real database values that are not classified by the lists."""
     if df is None or df.empty:
         return []
+
+    load_sku_classification()
     sku_names = df['SKU_UA'].fillna('').astype(str).str.strip()
-    known = {
-        str(value).strip().casefold()
-        for value in MHL_LIK_SKU + MHL_DD_SKU
-    }
+
+    known = set(_sku_to_category.keys())
     unknown = df.loc[
         ~sku_names.str.casefold().isin(known),
         ['BRAND', 'SKU_UA'],
