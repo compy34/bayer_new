@@ -571,7 +571,7 @@ class ReportApp:
 
         # Instructions
         ttk.Label(dialog, text='Керуйте активністю SKU — неактивні SKU не беруть участь у розрахунках MHL та звітах.\n'
-                  'Клік по колонці «Активний» або Пробел — переключити статус.',
+                  'Подвійний клік по рядку / Пробел / кнопка «Переключити» — змінити статус.',
                   font=('TkDefaultFont', 10, 'bold')).pack(pady=10)
 
         # Search frame
@@ -597,7 +597,7 @@ class ReportApp:
 
         # Create treeview
         columns = ['SKU_UA', 'BRAND', 'CATEGORY', 'ACTIVE']
-        tree = ttk.Treeview(dialog, columns=columns, show='headings', height=20)
+        tree = ttk.Treeview(dialog, columns=columns, show='headings', height=20, selectmode='browse')
         tree.pack(fill='both', expand=True, padx=10, pady=5)
 
         tree.heading('SKU_UA', text='Назва препарату (SKU)')
@@ -647,17 +647,31 @@ class ReportApp:
         # Initial populate
         populate_tree()
 
-        # Filter functions
-        def on_filter_change(*args):
+        # Filter functions - use lambda to capture current values
+        def on_search_change(*_):
             populate_tree(search_var.get(), cat_var.get(), status_var.get())
 
-        search_var.trace('w', on_filter_change)
-        cat_var.trace('w', on_filter_change)
-        status_var.trace('w', on_filter_change)
+        def on_cat_change(*_):
+            populate_tree(search_var.get(), cat_var.get(), status_var.get())
+
+        def on_status_change(*_):
+            populate_tree(search_var.get(), cat_var.get(), status_var.get())
+
+        search_var.trace('w', on_search_change)
+        cat_var.trace('w', on_cat_change)
+        status_var.trace('w', on_status_change)
 
         # --- Toggle active status ---
-        def toggle_sku_active(sku):
-            """Toggle active status for a SKU."""
+        def toggle_selected_sku():
+            """Toggle active status for currently selected SKU."""
+            selection = tree.selection()
+            if not selection:
+                return
+            item = selection[0]
+            sku = tree.item(item, 'values')[0]
+            _do_toggle(sku)
+
+        def _do_toggle(sku):
             row = all_skus[all_skus['SKU_UA'] == sku]
             if row.empty:
                 return
@@ -668,35 +682,25 @@ class ReportApp:
                 idx = all_skus.index[all_skus['SKU_UA'] == sku]
                 if len(idx) > 0:
                     all_skus.loc[idx[0], 'active'] = new_active
+                # Re-populate preserving selection position
                 populate_tree(search_var.get(), cat_var.get(), status_var.get())
                 self.status_var.set(f'Оновлено статус SKU: {sku} → {"Активний" if new_active else "Неактивний"}')
             else:
                 messagebox.showerror('Помилка', f'Не вдалося оновити статус для {sku}')
 
-        # Single-click on ACTIVE column (#4) to toggle
-        def on_tree_click(event):
-            region = tree.identify('region', event.x, event.y)
-            if region != 'cell':
-                return
-            column = tree.identify_column(event.x)
-            if column != '#4':  # ACTIVE column
-                return
-            item = tree.identify_row(event.y)
-            if not item:
-                return
-            sku = tree.item(item, 'values')[0]
-            toggle_sku_active(sku)
+        # Double-click on row to toggle
+        def on_double_click(event):
+            toggle_selected_sku()
 
-        # Space key to toggle focused row
+        # Space key to toggle focused/selected row
         def on_space(event):
-            item = tree.focus()
-            if item:
-                sku = tree.item(item, 'values')[0]
-                toggle_sku_active(sku)
-                return 'break'  # prevent default space behavior
+            toggle_selected_sku()
+            return 'break'  # prevent default space behavior (scroll)
 
-        tree.bind('<Button-1>', on_tree_click)
+        tree.bind('<Double-1>', on_double_click)
         tree.bind('<space>', on_space)
+        # Also allow Enter key
+        tree.bind('<Return>', on_space)
 
         # Buttons frame
         btn_frame = ttk.Frame(dialog)
@@ -728,14 +732,21 @@ class ReportApp:
             populate_tree(search_var.get(), cat_var.get(), status_var.get())
             self.status_var.set(f'Деактивовано SKU: {count}')
 
+        ttk.Button(btn_frame, text='Переключити виділене', command=toggle_selected_sku).pack(side='left', padx=5)
         ttk.Button(btn_frame, text='Активувати видимі', command=select_all_active).pack(side='left', padx=5)
         ttk.Button(btn_frame, text='Деактивувати видимі', command=select_all_inactive).pack(side='left', padx=5)
         ttk.Button(btn_frame, text='Закрити', command=dialog.destroy).pack(side='right', padx=5)
 
-        # Focus tree (not search) so Space/Click work immediately
-        tree.focus_set()
-        # But allow Tab to reach search
-        search_entry.bind('<Tab>', lambda e: tree.focus_set() or None)
+        # Ensure tree gets focus AFTER dialog is mapped
+        def set_focus():
+            tree.focus_set()
+            # Select first item if any
+            children = tree.get_children()
+            if children:
+                tree.selection_set(children[0])
+                tree.see(children[0])
+
+        dialog.after(100, set_focus)
 
 
 def main():
