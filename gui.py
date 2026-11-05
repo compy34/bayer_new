@@ -43,15 +43,21 @@ FONT_BUTTON = ('Segoe UI', 10, 'bold')
 
 
 def _find_requisites_file():
-    """Auto-detect requisites file in project root."""
+    """Auto-detect requisites file in project root. Prioritizes .xlsx files."""
     root = Path(__file__).resolve().parent
     patterns = ['реквізити*', 'requisites*', 'реквизиты*']
+    all_matches = []
     for pattern in patterns:
         matches = list(root.glob(f'{pattern}.*'))
         for m in matches:
             if m.suffix.lower() in ('.xlsx', '.xls', '.csv'):
-                return m
-    return None
+                all_matches.append(m)
+    if not all_matches:
+        return None
+    # Priority: .xlsx > .xls > .csv
+    ext_priority = {'.xlsx': 0, '.xls': 1, '.csv': 2}
+    all_matches.sort(key=lambda p: ext_priority.get(p.suffix.lower(), 99))
+    return all_matches[0]
 
 
 class ModernButton(tk.Button):
