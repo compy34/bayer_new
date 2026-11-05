@@ -486,15 +486,26 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
     ws.row_dimensions[7].height = 60
 
     # --- Row 9: Table headers ---
+    # Only 4 headers now: № п/п, Pharmacy name, Responsible person, Brand section header
+    # The "Сума до виплати, без ПДВ" is only in row 10 (total column)
     headers = ['№ п/п', 'Назва та адреса Аптеки/Аптечного пункту, де були надані маркетингові послуги',
-               'Відповідальна особа', 'Бренди Товару, щодо яких надавалися маркетингові послуги, кількість викладок',
-               'Сума до виплати, без ПДВ']
+               'Відповідальна особа']
 
     for col_idx, header in enumerate(headers, 1):
         cell = ws.cell(9, col_idx, header)
         cell.font = header_font
         cell.alignment = center
         cell.border = thin_border
+
+    # Brand section header - spans across all brand columns (from brand_start_col to brand_end_col)
+    ws.merge_cells(start_row=9, start_column=brand_start_col, end_row=9, end_column=brand_end_col)
+    brand_header_cell = ws.cell(9, brand_start_col, 'Бренди Товару, щодо яких надавалися маркетингові послуги, кількість викладок')
+    brand_header_cell.font = header_font
+    brand_header_cell.alignment = center
+    brand_header_cell.border = thin_border
+    # Apply border to all merged cells
+    for col in range(brand_start_col, brand_end_col + 1):
+        ws.cell(9, col).border = thin_border
 
     # --- Row 10: Brand sub-headers ---
     for i, brand in enumerate(template_brands):
@@ -503,7 +514,7 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
         cell.alignment = center
         cell.border = thin_border
 
-    # Total column header
+    # Total column header (only in row 10)
     cell = ws.cell(10, total_col, 'Сума до виплати, без ПДВ')
     cell.font = header_font
     cell.alignment = center
