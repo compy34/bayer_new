@@ -415,7 +415,7 @@ def get_mhl_availability_sum(mhl_df, template_brands):
 # ============================================================
 
 def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_ukrainian, executor_name, contract_no, contract_date,
-                         service1_total, service2_total, is_lic=True, mhl_df=None):
+                         service1_total, service2_total, is_lic=True, mhl_df=None, df_req=None, selected_pharmacy=None):
     """Fill звіт викладка+MHL sheet matching template structure exactly.
     Includes MHL data section at the bottom.
     """
@@ -786,6 +786,64 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
     total_vat_cell.number_format = '#,##0.00'
     total_vat_cell.border = thin_border
 
+    # ============================================================
+    # REQUISITES / SIGNATURE SECTION below MHL
+    # ============================================================
+    sig_start_row = mhl_total_vat_row + 2
+
+    # Extract director from requisites for selected pharmacy
+    director_name = ''
+    if df_req is not None and not df_req.empty and selected_pharmacy:
+        clean_selected = str(selected_pharmacy).strip()
+        target_col = None
+        for col_candidate in ['chain_name', 'Клиент из базы данных', 'Мережа', 'Назва']:
+            if col_candidate in df_req.columns:
+                target_col = col_candidate
+                break
+        if clean_selected and clean_selected != 'Усі аптеки' and target_col:
+            filtered_req = df_req[
+                df_req[target_col].astype(str).str.strip().str.lower()
+                == clean_selected.lower()
+            ]
+            if not filtered_req.empty:
+                matched_row = filtered_req.iloc[0]
+                director_name = str(matched_row.get('Директор', matched_row.get('директор', ''))).strip()
+
+    act_type = "ЛІК" if is_lic else "ДД"
+
+    # Line 1: "Цей Звіт є невід'ємною частиною Акта{ДД | ЛІК} №__________ про надання послуги від {date}"
+    ws.merge_cells(start_row=sig_start_row, start_column=1, end_row=sig_start_row, end_column=end_col)
+    line1_text = f'Цей Звіт є невід\'ємною частиною Акта {act_type} №__________ про надання послуги від {period_end_ukrainian}'
+    ws.cell(sig_start_row, 1, line1_text).font = normal_font
+    ws.cell(sig_start_row, 1).alignment = left
+
+    # Line 2: "інформація надана в повному обсязі"
+    ws.merge_cells(start_row=sig_start_row + 1, start_column=1, end_row=sig_start_row + 1, end_column=end_col)
+    ws.cell(sig_start_row + 1, 1, 'інформація надана в повному обсязі').font = normal_font
+    ws.cell(sig_start_row + 1, 1).alignment = left
+
+    # Line 3: Director signature (right-aligned)
+    ws.merge_cells(start_row=sig_start_row + 2, start_column=1, end_row=sig_start_row + 2, end_column=end_col)
+    director_font = Font(bold=True, size=12)
+    director_text = f'Директор: {director_name}' if director_name else 'Директор: ____________________'
+    ws.cell(sig_start_row + 2, 1, director_text).font = director_font
+    ws.cell(sig_start_row + 2, 1).alignment = right
+
+    # Line 4: "Від Замовника" (bold)
+    ws.merge_cells(start_row=sig_start_row + 3, start_column=1, end_row=sig_start_row + 3, end_column=end_col)
+    ws.cell(sig_start_row + 3, 1, 'Від Замовника').font = header_font
+    ws.cell(sig_start_row + 3, 1).alignment = left
+
+    # Line 5: "Перевірено" (bold)
+    ws.merge_cells(start_row=sig_start_row + 4, start_column=1, end_row=sig_start_row + 4, end_column=end_col)
+    ws.cell(sig_start_row + 4, 1, 'Перевірено').font = header_font
+    ws.cell(sig_start_row + 4, 1).alignment = left
+
+    # Line 6: "0"
+    ws.merge_cells(start_row=sig_start_row + 5, start_column=1, end_row=sig_start_row + 5, end_column=end_col)
+    ws.cell(sig_start_row + 5, 1, '0').font = normal_font
+    ws.cell(sig_start_row + 5, 1).alignment = left
+
     # --- Column widths ---
     ws.column_dimensions['A'].width = 8
     ws.column_dimensions['B'].width = 50
@@ -960,7 +1018,8 @@ def generate_excel_report(
     fill_zvit_worksheet(ws_zvit_lik, pivot_lik, LIK_BRANDS_TEMPLATE, period_str,
                         period_end_ukrainian,
                         executor_name, contract_no, contract_date,
-                        service1_lik, service2_lik, is_lic=True, mhl_df=mhl_df)
+                        service1_lik, service2_lik, is_lic=True, mhl_df=mhl_df,
+                        df_req=df_req, selected_pharmacy=selected_pharmacy)
 
     # ============================================================
     # SHEET 4: звіт викладка+MHL(ДД)
@@ -969,7 +1028,8 @@ def generate_excel_report(
     fill_zvit_worksheet(ws_zvit_dd, pivot_dd, DD_BRANDS_TEMPLATE, period_str,
                         period_end_ukrainian,
                         executor_name, contract_no, contract_date,
-                        service1_dd, service2_dd, is_lic=False, mhl_df=mhl_df)
+                        service1_dd, service2_dd, is_lic=False, mhl_df=mhl_df,
+                        df_req=df_req, selected_pharmacy=selected_pharmacy)
 
     # ============================================================
     # SHEET 5: під час акції (ЛІК) - empty
