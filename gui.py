@@ -187,22 +187,27 @@ class ReportApp:
         self.load_button.configure(state='normal')
         self.df = data
         self.df_mhl = mhl_data
+
+        has_pharmacy = data is not None and not data.empty
+        has_mhl = mhl_data is not None and not mhl_data.empty
+
         if data_error is not None:
             self.loaded_period = None
             self.status_var.set(f'Помилка завантаження звіту з БД: {data_error}')
-        elif data is None or data.empty:
+        elif not has_pharmacy and not has_mhl:
             self.loaded_period = None
-            self.status_var.set('За вказаний період дані звіту відсутні.')
+            self.status_var.set('За вказаний період дані відсутні (жодного джерела).')
         else:
+            # Set loaded_period if EITHER pharmacy OR MHL data exists
             self.loaded_period = period
             lik_count, dd_count, unknown_count = mhl_brand_counts(mhl_data)
-            status = f'Звіт: {len(data)} рядків'
+            status = f'Звіт: {len(data) if has_pharmacy else 0} рядків'
             if mhl_error is not None:
                 status += f'; помилка MHL: {mhl_error}'
             else:
                 unknown_samples = mhl_unknown_samples(mhl_data)
                 status += (
-                    f'; MHL SQL: {len(mhl_data)} рядків; '
+                    f'; MHL SQL: {len(mhl_data) if has_mhl else 0} рядків; '
                     f'ЛІК: {lik_count}; ДД: {dd_count}; '
                     f'невідомі: {unknown_count}'
                 )
