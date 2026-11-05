@@ -334,9 +334,22 @@ class ReportApp:
             raise ValueError(
                 'Спочатку завантажте дані для вказаного періоду.'
             )
-        report = build_report_dataframe(self._filtered_pharmacy_data())
-        if report is None or report.empty:
+
+        # Get filtered data for selected pharmacy
+        pharmacy_df = self._filtered_pharmacy_data()
+        mhl_df = self._filtered_mhl_data()
+
+        # Allow if either pharmacy data OR MHL data exists
+        if (pharmacy_df is None or pharmacy_df.empty) and (mhl_df is None or mhl_df.empty):
             raise ValueError('Немає даних для формування звіту за цією мережею.')
+
+        # Build preview from pharmacy data (if any)
+        report = build_report_dataframe(pharmacy_df)
+        # If pharmacy data empty but MHL exists, create empty preview with MHL info
+        if (report is None or report.empty) and mhl_df is not None and not mhl_df.empty:
+            # Create a minimal preview showing MHL data is available
+            report = pd.DataFrame({'Повідомлення': [f'Дані викладки відсутні. MHL даних: {len(mhl_df)} рядків']})
+
         return report
 
     def preview(self):
