@@ -245,14 +245,15 @@ class ReportApp:
         actions.grid(row=4, column=0, sticky='ew', pady=(8, 16))
         actions.columnconfigure(0, weight=1)
 
-        ModernButton(
+        self.load_button = ModernButton(
             actions, text='🔄 Завантажити дані', style='primary',
             command=self.load_data
-        ).pack(side='left', padx=(0, 10))
+        )
+        self.load_button.pack(side='left', padx=(0, 10))
 
         ModernButton(
             actions, text='📥 Згенерувати Excel', style='success',
-            command=self.generate_report
+            command=self.download
         ).pack(side='left', padx=(0, 10))
 
         ModernButton(
@@ -323,9 +324,6 @@ class ReportApp:
 
     def _query_period(self):
         return self._get_period_range()
-        start_date = datetime.strptime(start, '%d.%m.%Y').strftime('%Y-%m-%d')
-        end_date = datetime.strptime(end, '%d.%m.%Y').strftime('%Y-%m-%d')
-        return start_date, end_date
 
     def load_data(self):
         try:
@@ -507,19 +505,8 @@ class ReportApp:
         self._update_pharmacy_combo()
 
     def _validate_period(self):
-        try:
-            start = datetime.strptime(self.start_var.get().strip(), '%d.%m.%Y')
-            end = datetime.strptime(self.end_var.get().strip(), '%d.%m.%Y')
-        except ValueError as error:
-            raise ValueError('Невірний формат дати. Використовуйте ДД.ММ.РРРР.') from error
-        if start > end:
-            raise ValueError('Дата початку не може бути більшою за дату кінця.')
-        return self.start_var.get().strip(), self.end_var.get().strip()
-
-    def _selected_requisites(self):
-        if self.df_req is None or self.df_req.empty:
-            raise ValueError('Будь ласка, оберіть файл реквізитів!')
-        return self.df_req
+        """Validate and return period as YYYY-MM-DD strings."""
+        return self._query_period()
 
     def _get_preview_data(self):
         self._selected_requisites()
