@@ -335,9 +335,10 @@ class ReportApp:
                 'Спочатку завантажте дані для вказаного періоду.'
             )
 
-        # Get filtered data for selected pharmacy
+        # Get filtered pharmacy data for selected chain
         pharmacy_df = self._filtered_pharmacy_data()
-        mhl_df = self._filtered_mhl_data()
+        # Use FULL MHL data (not filtered by chain) - chain names may differ between requisites and MHL data
+        mhl_df = self.df_mhl
 
         # Allow if either pharmacy data OR MHL data exists
         if (pharmacy_df is None or pharmacy_df.empty) and (mhl_df is None or mhl_df.empty):
@@ -345,10 +346,9 @@ class ReportApp:
 
         # Build preview from pharmacy data (if any)
         report = build_report_dataframe(pharmacy_df)
-        # If pharmacy data empty but MHL exists, create empty preview with MHL info
+        # If pharmacy data empty but MHL exists, create minimal preview
         if (report is None or report.empty) and mhl_df is not None and not mhl_df.empty:
-            # Create a minimal preview showing MHL data is available
-            report = pd.DataFrame({'Повідомлення': [f'Дані викладки відсутні. MHL даних: {len(mhl_df)} рядків']})
+            report = pd.DataFrame({'Повідомлення': [f'Дані викладки відсутні. MHL даних: {len(mhl_df)} рядків (усі мережі)']})
 
         return report
 
@@ -401,7 +401,7 @@ class ReportApp:
                 period_start=start,
                 period_end=end,
                 selected_pharmacy=self.pharmacy_name_var.get(),
-                mhl_df=self._filtered_mhl_data(),
+                mhl_df=self.df_mhl,  # Use full MHL data (not filtered by chain)
             )
         except (OSError, ValueError, KeyError) as error:
             messagebox.showerror('Помилка', str(error))
