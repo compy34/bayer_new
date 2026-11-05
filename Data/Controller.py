@@ -14,15 +14,15 @@ def get_pharmacy_data(period_start, period_end):
             r'DATABASE=BAYER_CH_UA;'
             r'Trusted_Connection=yes;'
         )
-        
+
         connection = pyodbc.connect(conn_str)
-        
+
         # У pyodbc для параметрів використовується '?' замість '%s'
         query = """
-            SELECT 
+            SELECT
                 t.CHAIN_NAME,
-                t.PHARMACY_NAME, 
-                t.BRAND, 
+                t.PHARMACY_NAME,
+                t.BRAND,
                 t.MERCH,
                 COALESCE(p.Price, 0) AS Price
             FROM calc_Merch_KA t
@@ -30,13 +30,26 @@ def get_pharmacy_data(period_start, period_end):
             WHERE t.PERIOD >= ? AND t.PERIOD <= ?
         """
         # Передаємо параметри у вигляді кортежу
+
+        # DEBUG: Log query and params
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.debug(f"Pharmacy Query: {query}")
+        logger.debug(f"Pharmacy Params: ({period_start}, {period_end})")
+
         df = pd.read_sql(query, connection, params=(period_start, period_end))
+
+        # DEBUG: Log result info
+        logger.debug(f"Pharmacy Result: {len(df)} rows")
+        if not df.empty:
+            logger.debug(f"Pharmacy CHAIN_NAMEs: {df['CHAIN_NAME'].unique()[:10]}")
+
         return df
-        
+
     except pyodbc.Error as e:
         print(f'Помилка MS SQL Server: {e}')
         return None
-        
+
     finally:
         if 'connection' in locals():
             connection.close()
@@ -96,7 +109,23 @@ def get_mhl_data(period_start, period_end, chain_name=None):
             query += " AND LTRIM(RTRIM(LOWER(main.[CHAIN_NAME]))) = LOWER(?)"
             params.append(clean_chain)
 
-        return pd.read_sql(query, connection, params=params)
+        # DEBUG: Log query and params (remove in production)
+        import logging
+        logging.basicConfig(level=logging.DEBUG)
+        logger = logging.getLogger(__name__)
+        logger.debug(f"MHL Query: {query}")
+        logger.debug(f"MHL Params: {params}")
+
+        df = pd.read_sql(query, connection, params=params)
+
+        # DEBUG: Log result info
+        logger.debug(f"MHL Result: {len(df)} rows, columns: {list(df.columns)}")
+        if not df.empty:
+            logger.debug(f"MHL Sample CHAIN_NAMEs: {df['CHAIN_NAME'].unique()[:10]}")
+            logger.debug(f"MHL PENETRATION nulls: {df['PENETRATION'].isna().sum()}")
+            logger.debug(f"MHL PENETRATION_TARGET nulls: {df['PENETRATION_TARGET'].isna().sum()}")
+
+        return df
     except pyodbc.Error as error:
         raise OSError(f'Помилка завантаження MHL з MS SQL Server: {error}') from error
     finally:

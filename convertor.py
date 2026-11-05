@@ -370,12 +370,19 @@ def get_mhl_availability_sum(mhl_df, template_brands):
     if work_df.empty:
         return 0.0
 
+    # Convert numeric columns
     for column in ['PENETRATION', 'PRICE_CP', 'SUPPLY', 'PENETRATION_TARGET']:
-        work_df[column] = pd.to_numeric(work_df[column], errors='coerce').fillna(0)
+        work_df[column] = pd.to_numeric(work_df[column], errors='coerce')
 
-    # Sum of (SUPPLY * PRICE_CP) where PENETRATION >= PENETRATION_TARGET
+    # Calculate sum of purchased goods
     work_df['Сума закупленого'] = work_df['SUPPLY'] * work_df['PRICE_CP']
-    work_df['eligible'] = work_df['PENETRATION'] >= work_df['PENETRATION_TARGET']
+
+    # Eligible: PENETRATION >= PENETRATION_TARGET
+    # If PENETRATION is NULL -> treat as 0 (not eligible unless target is also 0/NULL)
+    # If PENETRATION_TARGET is NULL -> treat as 0 (eligible if penetration >= 0)
+    penetration = work_df['PENETRATION'].fillna(0)
+    target = work_df['PENETRATION_TARGET'].fillna(0)
+    work_df['eligible'] = penetration >= target
 
     total = work_df.loc[work_df['eligible'], 'Сума закупленого'].sum()
     return round(total, 2)
@@ -597,12 +604,21 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, executor_name
         work_df = work_df[sku_values.isin(allowed_values)].copy()
 
         if not work_df.empty:
+            # Convert numeric columns, keeping track of which were originally NULL
             for column in ['PENETRATION', 'PRICE_CP', 'SUPPLY', 'PENETRATION_TARGET']:
-                work_df[column] = pd.to_numeric(work_df[column], errors='coerce').fillna(0)
+                work_df[column] = pd.to_numeric(work_df[column], errors='coerce')
 
+            # Calculate sum of purchased goods
             work_df['Сума закупленого'] = work_df['SUPPLY'] * work_df['PRICE_CP']
-            work_df['eligible'] = work_df['PENETRATION'] >= work_df['PENETRATION_TARGET']
-            work_df = work_df[work_df['eligible']]
+
+            # Eligible: PENETRATION >= PENETRATION_TARGET
+            # If PENETRATION is NULL -> treat as 0 (not eligible unless target is also 0/NULL)
+            # If PENETRATION_TARGET is NULL -> treat as 0 (eligible if penetration >= 0)
+            penetration = work_df['PENETRATION'].fillna(0)
+            target = work_df['PENETRATION_TARGET'].fillna(0)
+            work_df['eligible'] = penetration >= target
+
+            work_df = work_df[work_df['eligible']].copy()
 
             if not work_df.empty:
                 # Group by product for display
