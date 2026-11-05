@@ -245,9 +245,11 @@ class ReportApp:
                 )
 
     def _filtered_pharmacy_data(self):
-        """Filter merchandising data by selected network (always a specific network)."""
+        """Filter merchandising data by selected network (always a specific network).
+        Returns empty DataFrame (not error) if no pharmacy data — caller handles MHL fallback."""
         if self.df is None or self.df.empty:
-            raise ValueError('Дані з бази відсутні.')
+            # Return empty DataFrame with expected columns instead of raising
+            return pd.DataFrame(columns=['CHAIN_NAME', 'PHARMACY_NAME', 'BRAND', 'MERCH', 'Price'])
 
         selected_name = self.pharmacy_name_var.get().strip()
         if not selected_name:
