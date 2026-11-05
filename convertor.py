@@ -848,13 +848,29 @@ def generate_excel_report(
     # Period formatting
     period_start = period_start or 'No date'
     period_end = period_end or 'No date'
-    # Last day of month for period end in Ukrainian format "ДД ММММ РРРР року"
-    period_end_last_day = get_last_day_of_month(period_end) if period_end != 'No date' else period_end
-    period_end_formatted = format_date_ukrainian(period_end_last_day) if period_end != 'No date' else period_end
-    # For display in report headers: "з «01» 02.2026 по «28» 02.2026"
-    period_str = f'з «{period_start[:2]}» {period_start[3:]} по «{period_end[:2]}» {period_end[3:]}'
-    # For "м. Київ" line and reward text: "28 лютого 2026 року"
-    period_end_ukrainian = period_end_formatted
+
+    # Parse dates and format properly
+    month_names = [
+        'січня', 'лютого', 'березня', 'квітня', 'травня', 'червня',
+        'липня', 'серпня', 'вересня', 'жовтня', 'листопада', 'грудня'
+    ]
+
+    if period_start != 'No date' and period_end != 'No date':
+        start_dt = datetime.strptime(period_start, '%Y-%m-%d')
+        end_dt = datetime.strptime(period_end, '%Y-%m-%d')
+        # Last day of month for period end
+        if end_dt.month == 12:
+            next_month = datetime(end_dt.year + 1, 1, 1)
+        else:
+            next_month = datetime(end_dt.year, end_dt.month + 1, 1)
+        end_last_day = next_month - timedelta(days=1)
+
+        # Format: "з "01" жовтня по "31" жовтня 2026 року."
+        period_str = f'з «{start_dt.day:02d}» {month_names[start_dt.month - 1]} по «{end_last_day.day:02d}» {month_names[end_last_day.month - 1]} {end_last_day.year} року'
+        period_end_ukrainian = f'{end_last_day.day:02d} {month_names[end_last_day.month - 1]} {end_last_day.year} року'
+    else:
+        period_str = period_start
+        period_end_ukrainian = period_end
 
     # Contractor details
     contract_no = '260326'
