@@ -17,7 +17,9 @@ def get_pharmacy_data(period_start, period_end):
 
         connection = pyodbc.connect(conn_str)
 
-        # У pyodbc для параметрів використовується '?' замість '%s'
+        # PERIOD в calc_Merch_KA зберігається як перший день місяця (напр. 2026-10-01).
+        # Користувач може ввести будь-яку дату в межах місяця — нормалізуємо на межі місяця.
+        # Використовуємо SQL функції для порівняння по року/місяцю.
         query = """
             SELECT
                 t.CHAIN_NAME,
@@ -27,7 +29,7 @@ def get_pharmacy_data(period_start, period_end):
                 COALESCE(p.Price, 0) AS Price
             FROM calc_Merch_KA t
             LEFT JOIN LA_Price p ON t.BRAND = p.Brand
-            WHERE t.PERIOD >= ? AND t.PERIOD <= ?
+            WHERE YEAR(t.PERIOD) * 100 + MONTH(t.PERIOD) BETWEEN YEAR(?) * 100 + MONTH(?) AND YEAR(?) * 100 + MONTH(?)
         """
         # Передаємо параметри у вигляді кортежу
 
@@ -35,9 +37,9 @@ def get_pharmacy_data(period_start, period_end):
         import logging
         logger = logging.getLogger(__name__)
         logger.debug(f"Pharmacy Query: {query}")
-        logger.debug(f"Pharmacy Params: ({period_start}, {period_end})")
+        logger.debug(f"Pharmacy Params: ({period_start}, {period_start}, {period_end}, {period_end})")
 
-        df = pd.read_sql(query, connection, params=(period_start, period_end))
+        df = pd.read_sql(query, connection, params=(period_start, period_start, period_end, period_end))
 
         # DEBUG: Log result info
         logger.debug(f"Pharmacy Result: {len(df)} rows")
