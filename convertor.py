@@ -430,10 +430,10 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
     center = Alignment(horizontal='center', vertical='center', wrap_text=True)
     left = Alignment(horizontal='left', vertical='center', wrap_text=True)
     right = Alignment(horizontal='right', vertical='center', wrap_text=True)
-    bold_font = Font(bold=True, size=10)
-    normal_font = Font(size=10)
-    header_font = Font(bold=True, size=9)
-    title_font = Font(bold=True, size=12)
+    # All text at 12pt; header (шапка) in bold
+    header_font = Font(bold=True, size=12)       # For header rows (шапка) - bold 12pt
+    normal_font = Font(size=12)                   # For data rows - regular 12pt
+    title_font = Font(bold=True, size=12)         # For titles - bold 12pt
 
     num_brands = len(template_brands)
     # Columns: A=№, B=Pharmacy, C=Responsible, D... = brands, last = Total
@@ -446,31 +446,31 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=end_col)
     act_type = "ЛІК" if is_lic else "ДД"
     ws.cell(1, 1, f'Додаток № 1 до Акта {act_type} № _______ про надані послуги')
-    ws.cell(1, 1).font = title_font
+    ws.cell(1, 1).font = header_font
     ws.cell(1, 1).alignment = center
 
     # --- Row 2: Contract reference ---
     ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=end_col)
     ws.cell(2, 1, f'відповідно до Договору про маркетингові послуги № {contract_no} від {contract_date} (надалі – «Договір»)')
-    ws.cell(2, 1).font = normal_font
+    ws.cell(2, 1).font = header_font
     ws.cell(2, 1).alignment = center
 
     # --- Row 3: Report title ---
     ws.merge_cells(start_row=3, start_column=1, end_row=3, end_column=end_col)
     ws.cell(3, 1, 'Звіт щодо Послуг, передбачених Договором за період')
-    ws.cell(3, 1).font = title_font
+    ws.cell(3, 1).font = header_font
     ws.cell(3, 1).alignment = center
 
     # --- Row 4: Period ---
     ws.merge_cells(start_row=4, start_column=1, end_row=4, end_column=end_col)
     ws.cell(4, 1, period_str)
-    ws.cell(4, 1).font = normal_font
+    ws.cell(4, 1).font = header_font
     ws.cell(4, 1).alignment = center
 
     # --- Row 6: Location + date ---
     ws.merge_cells(start_row=6, start_column=1, end_row=6, end_column=end_col)
     ws.cell(6, 1, f'м. Київ                                                                                                                                                                                                                               {period_end_ukrainian}')
-    ws.cell(6, 1).font = normal_font
+    ws.cell(6, 1).font = header_font
     ws.cell(6, 1).alignment = left
 
     # --- Row 7: Confirmation text ---
@@ -481,7 +481,7 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
         'відповідно до встановленого Замовником плану викладки згідно з Планограмою та адресною програмою:'
     )
     ws.cell(7, 1, confirmation)
-    ws.cell(7, 1).font = normal_font
+    ws.cell(7, 1).font = header_font
     ws.cell(7, 1).alignment = Alignment(wrap_text=True, vertical='top')
     ws.row_dimensions[7].height = 60
 
@@ -499,7 +499,7 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
     # --- Row 10: Brand sub-headers ---
     for i, brand in enumerate(template_brands):
         cell = ws.cell(10, brand_start_col + i, brand)
-        cell.font = Font(bold=True, size=9)
+        cell.font = header_font
         cell.alignment = center
         cell.border = thin_border
 
@@ -594,7 +594,7 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
     # MHL section title
     ws.merge_cells(start_row=mhl_start_row, start_column=1, end_row=mhl_start_row, end_column=end_col)
     ws.cell(mhl_start_row, 1, '2. Маркетингові послуги з забезпечення наявності у аптечному закладі Аптечної мережі Товарів із Рекомендованого переліку Товарів Замовника відповідно до Договору.')
-    ws.cell(mhl_start_row, 1).font = normal_font
+    ws.cell(mhl_start_row, 1).font = header_font
     ws.cell(mhl_start_row, 1).alignment = left
     ws.row_dimensions[mhl_start_row].height = 40
 
