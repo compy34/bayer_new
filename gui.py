@@ -20,124 +20,309 @@ from convertor import (
 from Data.Controller import get_mhl_data, get_pharmacy_data, load_requisites_file
 
 
+# ============================================================
+# UI CONSTANTS — modern, calm color palette
+# ============================================================
+BG_COLOR = '#f5f5f5'
+CARD_BG = '#ffffff'
+PRIMARY = '#1a56a0'
+PRIMARY_HOVER = '#154380'
+PRIMARY_LIGHT = '#e8eef7'
+ACCENT = '#007b5e'
+DANGER = '#c0392b'
+TEXT_MAIN = '#212529'
+TEXT_MUTED = '#6c757d'
+BORDER = '#dee2e6'
+SHADOW = '#0000001a'
+
+FONT_TITLE = ('Segoe UI', 16, 'bold')
+FONT_SUBTITLE = ('Segoe UI', 11)
+FONT_BODY = ('Segoe UI', 10)
+FONT_MONO = ('Consolas', 9)
+FONT_BUTTON = ('Segoe UI', 10, 'bold')
+
+
+def _find_requisites_file():
+    """Auto-detect requisites file in project root."""
+    root = Path(__file__).resolve().parent
+    patterns = ['реквізити*', 'requisites*', 'реквизиты*']
+    for pattern in patterns:
+        matches = list(root.glob(f'{pattern}.*'))
+        for m in matches:
+            if m.suffix.lower() in ('.xlsx', '.xls', '.csv'):
+                return m
+    return None
+
+
+class ModernButton(tk.Button):
+    """Custom button with hover effects."""
+    def __init__(self, master, style='primary', **kwargs):
+        self.style_type = style
+        colors = {
+            'primary': (PRIMARY, PRIMARY_HOVER, 'white'),
+            'secondary': ('#6c757d', '#5a6268', 'white'),
+            'success': (ACCENT, '#00664d', 'white'),
+            'danger': (DANGER, '#a02d22', 'white'),
+            'outline': ('white', PRIMARY_LIGHT, PRIMARY),
+        }
+        bg, hover_bg, fg = colors.get(style, colors['primary'])
+        super().__init__(
+            master,
+            bg=bg,
+            fg=fg,
+            activebackground=hover_bg,
+            activeforeground=fg,
+            font=FONT_BUTTON,
+            relief='flat',
+            bd=0,
+            padx=18,
+            pady=8,
+            cursor='hand2',
+            **kwargs
+        )
+        self.default_bg = bg
+        self.hover_bg = hover_bg
+        self.bind('<Enter>', lambda e: self.config(bg=hover_bg))
+        self.bind('<Leave>', lambda e: self.config(bg=bg))
+
+
+class Card(tk.Frame):
+    """Card container with subtle shadow."""
+    def __init__(self, master, **kwargs):
+        super().__init__(master, bg=CARD_BG, **kwargs)
+        self.configure(highlightbackground=BORDER, highlightthickness=1)
+
+
 class ReportApp:
 
     def __init__(self, root):
         self.root = root
-        self.root.title(
-            'Генератор маркетингових звітів та актів (Автоматизація)'
-        )
-        self.root.geometry('1100x700')
-        self.root.minsize(900, 600)
+        self.root.title('Генератор маркетингових звітів та актів')
+        self.root.geometry('900x600')
+        self.root.minsize(800, 550)
+        self.root.configure(bg=BG_COLOR)
+
+        # Data
         self.df = None
         self.df_mhl = None
         self.df_req = None
-        self.loaded_period = None
+        self.loaded_period = None  # (year, month)
         self.loading = False
         self.requisites_file_var = tk.StringVar(value='')
         self.pharmacy_name_var = tk.StringVar(value='')
+        self.year_var = tk.StringVar(value=str(datetime.now().year))
+        self.month_var = tk.StringVar(value=f'{datetime.now().month:02d}')
+
+        # Auto-detect requisites on startup
+        self._auto_detect_requisites()
+
         self._build_ui()
 
+    def _auto_detect_requisites(self):
+        """Try to find requisites file automatically on startup."""
+        found = _find_requisites_file()
+        if found:
+            try:
+                self.df_req = load_requisites_file(found)
+                self.requisites_file_var.set(found.name)
+                self._update_pharmacy_combo()
+            except Exception:
+                pass  # Silently fail, user can select manually
+
     def _build_ui(self):
-        root_frame = ttk.Frame(self.root, padding=12)
-        root_frame.pack(fill='both', expand=True)
-        root_frame.columnconfigure(1, weight=1)
-        root_frame.rowconfigure(5, weight=1)
+        # Root container
+        self.root.columnconfigure(0, weight=1)
+        self.root.rowconfigure(0, weight=1)
 
-        ttk.Label(
-            root_frame,
+        main = tk.Frame(self.root, bg=BG_COLOR)
+        main.grid(row=0, column=0, sticky='nsew', padx=24, pady=24)
+        main.columnconfigure(0, weight=1)
+
+        # Header
+        header = tk.Frame(main, bg=BG_COLOR)
+        header.grid(row=0, column=0, sticky='ew', pady=(0, 24))
+        header.columnconfigure(1, weight=1)
+
+        tk.Label(
+            header,
             text='Генератор звітів та актів',
-            font=('TkDefaultFont', 15, 'bold'),
-        ).grid(row=0, column=0, columnspan=3, sticky='w', pady=(0, 14))
+            font=FONT_TITLE,
+            bg=BG_COLOR,
+            fg=TEXT_MAIN
+        ).grid(row=0, column=0, sticky='w')
 
-        ttk.Label(root_frame, text='Файл реквізитів:').grid(
-            row=1, column=0, sticky='w', pady=4
-        )
-        ttk.Entry(
-            root_frame,
+        # Requisites card
+        req_card = Card(main, padx=20, pady=16)
+        req_card.grid(row=1, column=0, sticky='ew', pady=(0, 16))
+        req_card.columnconfigure(1, weight=1)
+
+        tk.Label(
+            req_card,
+            text='Файл реквізитів',
+            font=FONT_SUBTITLE,
+            bg=CARD_BG,
+            fg=TEXT_MAIN
+        ).grid(row=0, column=0, columnspan=3, sticky='w', pady=(0, 8))
+
+        self.req_entry = tk.Entry(
+            req_card,
             textvariable=self.requisites_file_var,
+            font=FONT_BODY,
             state='readonly',
-            width=75,
-        ).grid(row=1, column=1, sticky='ew', pady=4)
-        ttk.Button(
-            root_frame, text='Обрати файл...', command=self.select_requisites_file
-        ).grid(row=1, column=2, sticky='w', padx=(8, 0), pady=4)
-
-        ttk.Label(root_frame, text='Мережа / Клієнт:').grid(
-            row=2, column=0, sticky='w', pady=4
+            readonlybackground=CARD_BG,
+            relief='solid',
+            bd=1,
+            highlightthickness=1,
+            highlightcolor=PRIMARY,
+            highlightbackground=BORDER
         )
+        self.req_entry.grid(row=1, column=0, columnspan=2, sticky='ew', padx=(0, 10))
+
+        ModernButton(
+            req_card, text='Обрати файл...', style='outline',
+            command=self.select_requisites_file
+        ).grid(row=1, column=2, sticky='e')
+
+        # Pharmacy selection card
+        pharm_card = Card(main, padx=20, pady=16)
+        pharm_card.grid(row=2, column=0, sticky='ew', pady=(0, 16))
+        pharm_card.columnconfigure(1, weight=1)
+
+        tk.Label(
+            pharm_card,
+            text='Мережа / Клієнт',
+            font=FONT_SUBTITLE,
+            bg=CARD_BG,
+            fg=TEXT_MAIN
+        ).grid(row=0, column=0, columnspan=2, sticky='w', pady=(0, 8))
+
         self.pharmacy_combo = ttk.Combobox(
-            root_frame,
+            pharm_card,
             textvariable=self.pharmacy_name_var,
             state='readonly',
-            width=75,
+            font=FONT_BODY,
+            width=50
         )
-        self.pharmacy_combo.grid(row=2, column=1, columnspan=2, sticky='ew', pady=4)
+        self.pharmacy_combo.grid(row=1, column=0, sticky='ew')
+        self.pharmacy_combo.bind('<<ComboboxSelected>>', lambda e: self._on_pharmacy_change())
 
-        ttk.Label(root_frame, text='Період (Звітний):').grid(
-            row=3, column=0, sticky='w', pady=4
-        )
-        period_frame = ttk.Frame(root_frame)
-        period_frame.grid(row=3, column=1, columnspan=2, sticky='w', pady=4)
+        # Period selection card (Month/Year only)
+        period_card = Card(main, padx=20, pady=16)
+        period_card.grid(row=3, column=0, sticky='ew', pady=(0, 24))
+        period_card.columnconfigure(1, weight=1)
 
-        self.start_var = tk.StringVar(value='01.08.2026')
-        ttk.Entry(period_frame, textvariable=self.start_var, width=18).pack(
-            side='left'
-        )
-        ttk.Label(period_frame, text=' по ').pack(side='left')
-        self.end_var = tk.StringVar(value='31.08.2026')
-        ttk.Entry(period_frame, textvariable=self.end_var, width=18).pack(
-            side='left'
-        )
+        tk.Label(
+            period_card,
+            text='Звітний період',
+            font=FONT_SUBTITLE,
+            bg=CARD_BG,
+            fg=TEXT_MAIN
+        ).grid(row=0, column=0, columnspan=3, sticky='w', pady=(0, 8))
 
-        buttons = ttk.Frame(root_frame)
-        buttons.grid(row=4, column=0, columnspan=3, sticky='w', pady=(12, 8))
-        ttk.Button(buttons, text='Попередній перегляд', command=self.preview).pack(
-            side='left', padx=(0, 8)
+        # Year dropdown
+        years = [str(y) for y in range(2024, datetime.now().year + 2)]
+        tk.Label(period_card, text='Рік', font=FONT_BODY, bg=CARD_BG, fg=TEXT_MUTED).grid(row=1, column=0, sticky='w')
+        year_combo = ttk.Combobox(
+            period_card, textvariable=self.year_var, values=years,
+            state='readonly', font=FONT_BODY, width=10
         )
-        ttk.Button(buttons, text='Завантажити Excel', command=self.download).pack(
-            side='left'
-        )
-        ttk.Button(buttons, text='Класифікувати невідомі SKU', command=self.classify_unknown_skus).pack(
-            side='left', padx=(8, 0)
-        )
-        ttk.Button(buttons, text='Управління SKU (активність)', command=self.manage_sku_active).pack(
-            side='left', padx=(8, 0)
-        )
-        self.load_button = ttk.Button(
-            buttons, text='Завантажити дані за період', command=self.load_data
-        )
-        self.load_button.pack(side='left', padx=(8, 0))
+        year_combo.grid(row=2, column=0, sticky='w', padx=(0, 16), pady=(0, 8))
 
-        self.status_var = tk.StringVar(
-            value='Вкажіть період і натисніть "Завантажити дані за період".'
+        # Month dropdown
+        months = [f'{m:02d}' for m in range(1, 13)]
+        month_names = ['Січень', 'Лютий', 'Березень', 'Квітень', 'Травень', 'Червень',
+                       'Липень', 'Серпень', 'Вересень', 'Жовтень', 'Листопад', 'Грудень']
+        tk.Label(period_card, text='Місяць', font=FONT_BODY, bg=CARD_BG, fg=TEXT_MUTED).grid(row=1, column=1, sticky='w')
+        self.month_combo = ttk.Combobox(
+            period_card, textvariable=self.month_var,
+            values=[f'{m:02d} — {n}' for m, n in zip(range(1, 13), month_names)],
+            state='readonly', font=FONT_BODY, width=22
         )
-        ttk.Label(root_frame, textvariable=self.status_var).grid(
-            row=5, column=0, columnspan=3, sticky='w', pady=(0, 8)
-        )
+        self.month_combo.grid(row=2, column=1, sticky='w', pady=(0, 8))
 
-        table_frame = ttk.Frame(root_frame)
-        table_frame.grid(row=6, column=0, columnspan=3, sticky='nsew')
-        table_frame.columnconfigure(0, weight=1)
-        table_frame.rowconfigure(0, weight=1)
+        # Action buttons
+        actions = tk.Frame(main, bg=BG_COLOR)
+        actions.grid(row=4, column=0, sticky='ew', pady=(8, 16))
+        actions.columnconfigure(0, weight=1)
 
-        self.tree = ttk.Treeview(table_frame, show='headings')
-        self.tree.grid(row=0, column=0, sticky='nsew')
+        ModernButton(
+            actions, text='🔄 Завантажити дані', style='primary',
+            command=self.load_data
+        ).pack(side='left', padx=(0, 10))
 
-        y_scroll = ttk.Scrollbar(
-            table_frame, orient='vertical', command=self.tree.yview
+        ModernButton(
+            actions, text='📥 Згенерувати Excel', style='success',
+            command=self.generate_report
+        ).pack(side='left', padx=(0, 10))
+
+        ModernButton(
+            actions, text='⚙️ SKU', style='secondary',
+            command=self.manage_sku_active
+        ).pack(side='left', padx=(0, 10))
+
+        ModernButton(
+            actions, text='🏷️ Класифікувати SKU', style='secondary',
+            command=self.classify_unknown_skus
+        ).pack(side='left')
+
+        # Status bar
+        self.status_var = tk.StringVar(value='Готово до роботи')
+        status_bar = tk.Frame(main, bg=CARD_BG, highlightbackground=BORDER, highlightthickness=1)
+        status_bar.grid(row=5, column=0, sticky='ew', pady=(16, 0))
+        status_bar.columnconfigure(0, weight=1)
+
+        self.status_label = tk.Label(
+            status_bar,
+            textvariable=self.status_var,
+            font=FONT_MONO,
+            bg=CARD_BG,
+            fg=TEXT_MUTED,
+            anchor='w',
+            padx=12,
+            pady=8
         )
-        y_scroll.grid(row=0, column=1, sticky='ns')
-        x_scroll = ttk.Scrollbar(
-            table_frame, orient='horizontal', command=self.tree.xview
+        self.status_label.grid(row=0, column=0, sticky='ew')
+
+        # Progress indicator (hidden by default)
+        self.progress = ttk.Progressbar(
+            status_bar, mode='indeterminate', length=200
         )
-        x_scroll.grid(row=1, column=0, sticky='ew')
-        self.tree.configure(
-            yscrollcommand=y_scroll.set, xscrollcommand=x_scroll.set
-        )
+        self.progress.grid(row=0, column=1, padx=12, pady=8)
+
+    def _on_pharmacy_change(self):
+        """Called when pharmacy selection changes."""
+        pass  # Can add validation here if needed
+
+    def _get_period_range(self):
+        """Get period start/end as YYYY-MM-DD for the selected month/year."""
+        year = int(self.year_var.get())
+        month = int(self.month_var.get()[:2])
+        start = f'{year}-{month:02d}-01'
+        # Last day of month
+        if month == 12:
+            end = f'{year + 1}-01-01'
+        else:
+            end = f'{year}-{month + 1:02d}-01'
+        from datetime import timedelta
+        end_date = datetime.strptime(end, '%Y-%m-%d') - timedelta(days=1)
+        end = end_date.strftime('%Y-%m-%d')
+        return start, end
+
+    def _get_period_display(self):
+        """Get human-readable period string."""
+        year = self.year_var.get()
+        month_idx = int(self.month_var.get()[:2]) - 1
+        month_names = ['січня', 'лютого', 'березня', 'квітня', 'травня', 'червня',
+                       'липня', 'серпня', 'вересня', 'жовтня', 'листопада', 'грудня']
+        return f'{month_names[month_idx]} {year}'
+
+    def _selected_requisites(self):
+        if self.df_req is None or self.df_req.empty:
+            raise ValueError('Будь ласка, оберіть файл реквізитів!')
+        return self.df_req
 
     def _query_period(self):
-        start, end = self._validate_period()
+        return self._get_period_range()
         start_date = datetime.strptime(start, '%d.%m.%Y').strftime('%Y-%m-%d')
         end_date = datetime.strptime(end, '%d.%m.%Y').strftime('%Y-%m-%d')
         return start_date, end_date
