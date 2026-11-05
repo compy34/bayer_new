@@ -350,6 +350,9 @@ class ReportApp:
             f'Завантаження даних з БД за період {period[0]} — {period[1]}...'
         )
 
+        # Get selected pharmacy/network for MHL filtering
+        selected_pharmacy = self.pharmacy_name_var.get().strip()
+
         def load():
             data = None
             mhl_data = None
@@ -360,8 +363,8 @@ class ReportApp:
             except (OSError, TypeError, ValueError) as load_error:
                 data_error = load_error
             try:
-                # Load all MHL data (filtering will be done in Python for flexibility)
-                mhl_data = get_mhl_data(*period)
+                # Load MHL data filtered by selected network (chain_name)
+                mhl_data = get_mhl_data(*period, chain_name=selected_pharmacy if selected_pharmacy else None)
             except (OSError, TypeError, ValueError) as load_error:
                 mhl_error = load_error
             self.root.after(
@@ -569,10 +572,17 @@ class ReportApp:
             messagebox.showwarning('Попередження', str(error))
             return
 
+        # Build filename: (network_name)_ЗВІТ+АКТ.xlsx
+        network_name = self.pharmacy_name_var.get().strip()
+        if not network_name:
+            network_name = 'Мережа'
+        safe_name = ''.join(c for c in network_name if c.isalnum() or c in ' _-').strip()
+        default_filename = f'{safe_name}_ЗВІТ+АКТ.xlsx'
+
         filename = filedialog.asksaveasfilename(
             title='Зберегти звіт як',
             initialdir=str(Path.cwd()),
-            initialfile='marketing_report.xlsx',
+            initialfile=default_filename,
             defaultextension='.xlsx',
             filetypes=[('Excel файли', '*.xlsx')],
         )
@@ -588,7 +598,7 @@ class ReportApp:
                 period_start=start,
                 period_end=end,
                 selected_pharmacy=self.pharmacy_name_var.get(),
-                mhl_df=self.df_mhl,  # Use full MHL data (not filtered by chain)
+                mhl_df=self.df_mhl,  # MHL data already filtered by chain in DB query
             )
         except (OSError, ValueError, KeyError) as error:
             messagebox.showerror('Помилка', str(error))
