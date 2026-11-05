@@ -3,6 +3,8 @@ import tkinter as tk
 from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
+
+import pandas as pd
 from convertor import (
     build_report_dataframe,
     generate_excel_report,
