@@ -1,7 +1,29 @@
 import pandas as pd
+from datetime import datetime, timedelta
 from openpyxl.styles import Alignment, Border, Font, Side
 from openpyxl.utils import get_column_letter
 from act_generator import generate_act_sheet
+
+
+def format_date_ukrainian(date_str):
+    """Format date as 'ДД ММММ РРРР року' in Ukrainian (e.g., '28 лютого 2026 року')."""
+    month_names = [
+        'січня', 'лютого', 'березня', 'квітня', 'травня', 'червня',
+        'липня', 'серпня', 'вересня', 'жовтня', 'листопада', 'грудня'
+    ]
+    dt = datetime.strptime(date_str, '%Y-%m-%d')
+    return f'{dt.day:02d} {month_names[dt.month - 1]} {dt.year} року'
+
+
+def get_last_day_of_month(date_str):
+    """Get last day of month for a date in YYYY-MM-DD format, returns YYYY-MM-DD."""
+    dt = datetime.strptime(date_str, '%Y-%m-%d')
+    if dt.month == 12:
+        next_month = datetime(dt.year + 1, 1, 1)
+    else:
+        next_month = datetime(dt.year, dt.month + 1, 1)
+    last_day = next_month - timedelta(days=1)
+    return last_day.strftime('%Y-%m-%d')
 
 # ============================================================
 # BRAND LISTS FROM TEMPLATE
@@ -392,7 +414,7 @@ def get_mhl_availability_sum(mhl_df, template_brands):
 # ZVIT SHEET GENERATOR (звіт викладка+MHL) - matches template exactly
 # ============================================================
 
-def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, executor_name, contract_no, contract_date,
+def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_ukrainian, executor_name, contract_no, contract_date,
                          service1_total, service2_total, is_lic=True, mhl_df=None):
     """Fill звіт викладка+MHL sheet matching template structure exactly.
     Includes MHL data section at the bottom.
@@ -447,7 +469,7 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, executor_name
 
     # --- Row 6: Location + date ---
     ws.merge_cells(start_row=6, start_column=1, end_row=6, end_column=end_col)
-    ws.cell(6, 1, f'м. Київ                                                                                                                                                                                                                               {period_str}')
+    ws.cell(6, 1, f'м. Київ                                                                                                                                                                                                                               {period_end_ukrainian}')
     ws.cell(6, 1).font = normal_font
     ws.cell(6, 1).alignment = left
 
@@ -658,10 +680,11 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, executor_name
         ws.cell(idx, 3).alignment = left
         ws.cell(idx, 3).border = thin_border
 
-        ws.cell(idx, 4, round(mhl_row['PENETRATION'] * 100, 2)).font = normal_font
+        # PENETRATION as integer percentage with % sign
+        penetration_pct = int(round(mhl_row['PENETRATION'] * 100))
+        ws.cell(idx, 4, f'{penetration_pct}%').font = normal_font
         ws.cell(idx, 4).alignment = center
         ws.cell(idx, 4).border = thin_border
-        ws.cell(idx, 4).number_format = '0.00'
 
         ws.cell(idx, 5, round(mhl_row['PRICE_CP'], 2)).font = normal_font
         ws.cell(idx, 5).alignment = right
@@ -702,11 +725,12 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, executor_name
 
     # Reward row (10% of total purchased)
     mhl_reward_row = mhl_total_row + 1
+    # Hardcoded date as requested
     reward_text = (
         f'Виногорода за забезпечення наявності у аптечному закладі '
         f'Товарів із Рекомендованого переліку Товару Замовника, '
         f'згідно пункту 2.2.2 Договору про маркетингові послуги №{contract_no} '
-        f'від {period_str}'
+        f'від 27 лютого 2026 року'
     )
     ws.merge_cells(start_row=mhl_reward_row, start_column=1, end_row=mhl_reward_row, end_column=6)
     cell = ws.cell(mhl_reward_row, 1, reward_text)
@@ -824,7 +848,13 @@ def generate_excel_report(
     # Period formatting
     period_start = period_start or 'No date'
     period_end = period_end or 'No date'
+    # Last day of month for period end in Ukrainian format "ДД ММММ РРРР року"
+    period_end_last_day = get_last_day_of_month(period_end) if period_end != 'No date' else period_end
+    period_end_formatted = format_date_ukrainian(period_end_last_day) if period_end != 'No date' else period_end
+    # For display in report headers: "з «01» 02.2026 по «28» 02.2026"
     period_str = f'з «{period_start[:2]}» {period_start[3:]} по «{period_end[:2]}» {period_end[3:]}'
+    # For "м. Київ" line and reward text: "28 лютого 2026 року"
+    period_end_ukrainian = period_end_formatted
 
     # Contractor details
     contract_no = '260326'
@@ -901,6 +931,7 @@ def generate_excel_report(
     # ============================================================
     ws_zvit_lik = wb.create_sheet(title='звіт викладка+MHL(ЛІК)')
     fill_zvit_worksheet(ws_zvit_lik, pivot_lik, LIK_BRANDS_TEMPLATE, period_str,
+                        period_end_ukrainian,
                         executor_name, contract_no, contract_date,
                         service1_lik, service2_lik, is_lic=True, mhl_df=mhl_df)
 
@@ -909,6 +940,7 @@ def generate_excel_report(
     # ============================================================
     ws_zvit_dd = wb.create_sheet(title='звіт викладка+MHL(ДД)')
     fill_zvit_worksheet(ws_zvit_dd, pivot_dd, DD_BRANDS_TEMPLATE, period_str,
+                        period_end_ukrainian,
                         executor_name, contract_no, contract_date,
                         service1_dd, service2_dd, is_lic=False, mhl_df=mhl_df)
 
