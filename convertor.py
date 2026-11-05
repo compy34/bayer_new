@@ -762,21 +762,43 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
         top=Side(style='thin'), bottom=Side(style='double')
     )
 
-    # VAT row (20% of reward)
-    mhl_vat_row = mhl_reward_row + 1
-    ws.cell(mhl_vat_row, 2, 'ПДВ 20%').font = header_font
-    ws.cell(mhl_vat_row, 2).alignment = right
-    ws.cell(mhl_vat_row, 2).border = thin_border
+    # "Всього без ПДВ" row - same value as reward
+    mhl_subtotal_row = mhl_reward_row + 1
+    ws.cell(mhl_subtotal_row, 6, 'Всього без ПДВ').font = header_font
+    ws.cell(mhl_subtotal_row, 6).alignment = right
+    ws.cell(mhl_subtotal_row, 6).border = thin_border
+    subtotal_cell = ws.cell(mhl_subtotal_row, 7, reward_amount)
+    subtotal_cell.font = header_font
+    subtotal_cell.alignment = right
+    subtotal_cell.number_format = '#,##0.00'
+    subtotal_cell.border = Border(
+        left=Side(style='thin'), right=Side(style='thin'),
+        top=Side(style='thin'), bottom=Side(style='double')
+    )
+    # Add empty borders for columns 1-5
+    for col in range(1, 6):
+        if col != 6:
+            ws.cell(mhl_subtotal_row, col).border = thin_border
+
+    # VAT row (20% of reward) - label in column 6 (right-aligned before amount)
+    mhl_vat_row = mhl_subtotal_row + 1
+    ws.cell(mhl_vat_row, 6, 'ПДВ 20%').font = header_font
+    ws.cell(mhl_vat_row, 6).alignment = right
+    ws.cell(mhl_vat_row, 6).border = thin_border
     vat_amount = round(reward_amount * 0.2, 2)
     vat_cell = ws.cell(mhl_vat_row, 7, vat_amount)
     vat_cell.font = header_font
     vat_cell.alignment = right
     vat_cell.number_format = '#,##0.00'
     vat_cell.border = thin_border
+    # Add empty borders for columns 1-5
+    for col in range(1, 6):
+        if col != 6:
+            ws.cell(mhl_vat_row, col).border = thin_border
 
-    # Total with VAT row (reward + VAT)
+    # Total with VAT row (reward + VAT) - label in column 6 (right-aligned before amount)
     mhl_total_vat_row = mhl_vat_row + 1
-    ws.cell(mhl_total_vat_row, 2, 'Всього з ПДВ').font = header_font
+    ws.cell(mhl_total_vat_row, 6, 'Всього з ПДВ').font = header_font
     ws.cell(mhl_total_vat_row, 2).alignment = right
     ws.cell(mhl_total_vat_row, 2).border = thin_border
     total_vat_amount = round(reward_amount + vat_amount, 2)
