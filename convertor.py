@@ -843,9 +843,9 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
 
     act_type = "ЛІК" if is_lic else "ДД"
 
-    # Line 1: "Цей Звіт є невід'ємною частиною Акта{ДД | ЛІК} №__________ про надання послуги від {date}"
+    # Line 1: "Цей Звіт є невід'ємною частиною Акта{ДД | ЛІК} №__________ про надання послуг від {date}"
     ws.merge_cells(start_row=sig_start_row, start_column=1, end_row=sig_start_row, end_column=end_col)
-    line1_text = f'Цей Звіт є невід\'ємною частиною Акта {act_type} №__________ про надання послуги від {period_end_ukrainian}'
+    line1_text = f'Цей Звіт є невід\'ємною частиною Акта {act_type} №__________ про надання послуг від {period_end_ukrainian}'
     ws.cell(sig_start_row, 1, line1_text).font = normal_font
     ws.cell(sig_start_row, 1).alignment = left
 
@@ -1012,11 +1012,11 @@ def generate_excel_report(
     # SHEET 1: акт_ЛІК (uses act_generator for correct act structure)
     # ============================================================
     ws_akt_lik = wb.create_sheet(title='акт_ЛІК')
-    # Pass total = service1 + service2 for both services
     generate_act_sheet(
         ws=ws_akt_lik,
         df_req=df_req,
-        total_sum_without_vat=service1_lik + service2_lik,
+        service1_sum=service1_lik,
+        service2_sum=service2_lik,
         period_start=period_start,
         period_end=period_end,
         selected_pharmacy=selected_pharmacy,
@@ -1033,7 +1033,8 @@ def generate_excel_report(
     generate_act_sheet(
         ws=ws_akt_dd,
         df_req=df_req,
-        total_sum_without_vat=service1_dd + service2_dd,
+        service1_sum=service1_dd,
+        service2_sum=service2_dd,
         period_start=period_start,
         period_end=period_end,
         selected_pharmacy=selected_pharmacy,

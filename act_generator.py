@@ -5,7 +5,8 @@ from openpyxl.styles import Alignment, Border, Font, Side
 def generate_act_sheet(
         ws,
         df_req,
-        total_sum_without_vat,
+        service1_sum,
+        service2_sum,
         period_start,
         period_end,
         selected_pharmacy='Усі аптеки',
@@ -41,6 +42,8 @@ def generate_act_sheet(
         '_____________________ / ________ /',
     ]
 
+    customer_name = 'ТОВ «БАЙЕР»'
+
     if df_req is not None and not df_req.empty:
         matched_row = None
         clean_selected = str(selected_pharmacy).strip()
@@ -61,20 +64,23 @@ def generate_act_sheet(
         if matched_row is None:
             matched_row = df_req.iloc[0]
 
+        # Виконавець — з колонки "Виконавець" або "Юридическое лицо"
         executor_name = str(
             matched_row.get('Виконавець', matched_row.get('Юридическое лицо', executor_name))
+        )
+        # Замовник — з колонки "Юридическое лицо" (якщо є), інакше дефолт
+        customer_name = str(
+            matched_row.get('Юридическое лицо', customer_name)
         )
         contract_no = str(matched_row.get('№ договора', contract_no))
         contract_date = str(matched_row.get('Дата договора', contract_date))
 
-        # БЕРЕМО ГОТОВІ РЕКВІЗИТИ З КОЛОНКИ ФАЙЛУ
+        # БЕРЕМО ГОТОВІ РЕКВІЗИТИ З КОЛОНКИ ФАЙЛУ (для Виконавця)
         raw_req_text = str(matched_row.get('Реквизити', ''))
         if raw_req_text and raw_req_text.lower() != 'nan':
             full_executor_requisites = [
                 line.strip() for line in raw_req_text.split('\n') if line.strip()
             ]
-
-    customer_name = 'ТОВ «БАЙЕР»'
 
     ws.merge_cells('A1:E1')
     ws['A1'] = f'АКТ № {act_number}'
@@ -132,21 +138,30 @@ def generate_act_sheet(
         cell.border = thin_border
     ws.row_dimensions[13].height = 25
 
-    sum1_no_vat = float(total_sum_without_vat)
+    # Послуга 1: Викладка
+    sum1_no_vat = float(service1_sum)
     vat1 = sum1_no_vat * 0.2
     total1 = sum1_no_vat + vat1
 
-    sum2_no_vat = 0.00
+    # Послуга 2: Наявність (MHL)
+    sum2_no_vat = float(service2_sum)
     vat2 = sum2_no_vat * 0.2
     total2 = sum2_no_vat + vat2
 
     services_data = [
         (
-            'Маркетингові та рекламні послуги (мерчандайзинг)',
+            'Маркетингові послуги з розміщення Товару Замовника на полицях аптечних закладів аптечної мережі відповідно до встановленого Замовником плану викладки згідно з Планограмою та адресною програмою, затверджених Додатком.',
             'послуга',
             sum1_no_vat,
             vat1,
             total1,
+        ),
+        (
+            'Маркетингові послуги з забезпечення наявності у аптечному закладі аптечної мережі Товарів із Рекомендованого переліку Товарів Замовника відповідно до Договору.',
+            'послуга',
+            sum2_no_vat,
+            vat2,
+            total2,
         ),
     ]
 
@@ -170,7 +185,7 @@ def generate_act_sheet(
         c5.alignment = right_alignment
         c5.border = thin_border
         c5.number_format = '#,##0.00'
-        ws.row_dimensions[row_idx].height = 30
+        ws.row_dimensions[row_idx].height = 45  # Increased height for long text
         row_idx += 1
 
     last_service_row = row_idx - 1
@@ -265,7 +280,7 @@ def generate_act_sheet(
         if i < len(customer_details):
             ws.cell(row=curr_row, column=4, value=customer_details[i]).font = Font(size=9)
 
-    ws.column_dimensions['A'].width = 42
+    ws.column_dimensions['A'].width = 55  # Increased for long service names
     ws.column_dimensions['B'].width = 15
     ws.column_dimensions['C'].width = 18
     ws.column_dimensions['D'].width = 15
