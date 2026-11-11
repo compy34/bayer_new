@@ -598,7 +598,7 @@ class ReportApp:
                 period_start=start,
                 period_end=end,
                 selected_pharmacy=self.pharmacy_name_var.get(),
-                mhl_df=self.df_mhl,  # MHL data already filtered by chain in DB query
+                mhl_df=self._filtered_mhl_data(),  # Filter MHL by current selection (match pharmacy data)
             )
         except (OSError, ValueError, KeyError) as error:
             messagebox.showerror('Помилка', str(error))
