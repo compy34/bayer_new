@@ -892,9 +892,371 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
 
 
 # ============================================================
-# EMPTY TMA SHEETS (під час акції)
+# TMA SHEETS (під час акції) — NEW IMPLEMENTATION
 # ============================================================
 
+import json
+from pathlib import Path
+
+TMA_AUTH_FILE = Path(__file__).resolve().parent / 'tma_auth.json'
+
+_tma_auth_cache = None
+
+
+def load_tma_auth():
+    """Load TMA authorization amounts from JSON config."""
+    global _tma_auth_cache
+    if _tma_auth_cache is not None:
+        return _tma_auth_cache
+    if TMA_AUTH_FILE.exists():
+        try:
+            with open(TMA_AUTH_FILE, 'r', encoding='utf-8') as f:
+                _tma_auth_cache = json.load(f)
+        except Exception:
+            _tma_auth_cache = {}
+    else:
+        _tma_auth_cache = {}
+    return _tma_auth_cache
+
+
+def save_tma_auth(data):
+    """Save TMA authorization amounts to JSON config."""
+    global _tma_auth_cache
+    try:
+        with open(TMA_AUTH_FILE, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        _tma_auth_cache = data
+        return True
+    except Exception as e:
+        print(f"Error saving TMA auth: {e}")
+        return False
+
+
+def get_tma_auth_amount(chain_name, is_lic=True):
+    """Get authorization amount for a chain and category (ЛІК/ДД)."""
+    auth_data = load_tma_auth()
+    cat = 'ЛІК' if is_lic else 'ДД'
+    return auth_data.get(chain_name, {}).get(cat, 0.0)
+
+
+def set_tma_auth_amount(chain_name, is_lic, amount):
+    """Set authorization amount for a chain and category."""
+    auth_data = load_tma_auth()
+    cat = 'ЛІК' if is_lic else 'ДД'
+    if chain_name not in auth_data:
+        auth_data[chain_name] = {}
+    auth_data[chain_name][cat] = float(amount)
+    return save_tma_auth(auth_data)
+
+
+def get_all_sku_for_category(template_brands):
+    """Get all SKUs for a category (ЛІК or ДД) from classification with their brands and prices."""
+    from convertor import get_mhl_lik_sku, get_mhl_dd_sku, SERVICE_PRICES, LIK_BRANDS_TEMPLATE, DD_BRANDS_TEMPLATE
+
+    # Determine which category based on template brands
+    is_lic = template_brands == LIK_BRANDS_TEMPLATE
+
+    if is_lic:
+        sku_list = get_mhl_lik_sku()
+    else:
+        sku_list = get_mhl_dd_sku()
+
+    # Build list of (sku_name, brand, price)
+    result = []
+    for sku in sku_list:
+        brand = get_sku_brand(sku)
+        price = SERVICE_PRICES.get(brand, 0.0)
+        result.append({
+            'sku': sku,
+            'brand': brand,
+            'price': price
+        })
+    return result
+
+
+def fill_tma_worksheet(ws, template_brands, period_start, period_end, executor_name,
+                       contract_no, contract_date, selected_pharmacy, mhl_df, is_lic=True):
+    """Fill 'Під час акції' sheet with full TMA report structure."""
+
+    thin_border = Border(
+        left=Side(style='thin'), right=Side(style='thin'),
+        top=Side(style='thin'), bottom=Side(style='thin'),
+    )
+    center = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    left = Alignment(horizontal='left', vertical='center', wrap_text=True)
+    right = Alignment(horizontal='right', vertical='center', wrap_text=True)
+    header_font = Font(bold=True, size=12)
+    normal_font = Font(size=12)
+    bold_font = Font(bold=True, size=12)
+
+    # Category label
+    act_type = "ЛІК" if is_lic else "ДД"
+
+    # Period formatting (same as in zvit)
+    month_names = [
+        'січня', 'лютого', 'березня', 'квітня', 'травня', 'червня',
+        'липня', 'серпня', 'вересня', 'жовтня', 'листопада', 'грудня'
+    ]
+
+    start_dt = datetime.strptime(period_start, '%Y-%m-%d')
+    end_dt = datetime.strptime(period_end, '%Y-%m-%d')
+    if end_dt.month == 12:
+        next_month = datetime(end_dt.year + 1, 1, 1)
+    else:
+        next_month = datetime(end_dt.year, end_dt.month + 1, 1)
+    end_last_day = next_month - timedelta(days=1)
+
+    period_str = f'з «{start_dt.day:02d}» {month_names[start_dt.month - 1]} по «{end_last_day.day:02d}» {month_names[end_last_day.month - 1]} {end_last_day.year} року'
+    period_end_ukrainian = f'{end_last_day.day:02d} {month_names[end_last_day.month - 1]} {end_last_day.year} року'
+    period_short = f'{end_last_day.month:02d}.{end_last_day.year}'  # For "Період проведення акції" column
+
+    # Row counter
+    row = 1
+
+    # --- Row 1: Додаток №1 до Акту ---
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=7)
+    ws.cell(row, 1, f'Додаток №1 до Акту №______ про надання послуги від {period_end_ukrainian}').font = header_font
+    ws.cell(row, 1).alignment = center
+    row += 1
+
+    # --- Row 2: Звіт щодо проведення ТМА ---
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=7)
+    ws.cell(row, 1, f'Звіт щодо проведення ТМА ТОВ "БАЙЄР" за період {period_str}').font = header_font
+    ws.cell(row, 1).alignment = center
+    row += 1
+
+    # --- Row 3: До Акту ТМА (ЛІК/ДД) ---
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=7)
+    ws.cell(row, 1, f'До Акту ТМА ({act_type}) №_____ про надання послуги від {period_end_ukrainian}').font = header_font
+    ws.cell(row, 1).alignment = center
+    row += 1
+
+    # --- Row 4: м. Київ + дата ---
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=7)
+    ws.cell(row, 1, f'м. Київ                                                                                                                                                                                                                               {period_end_ukrainian}').font = header_font
+    ws.cell(row, 1).alignment = left
+    row += 1
+
+    # --- Row 5: Виконавець з реквізитів ---
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=7)
+    ws.cell(row, 1, executor_name).font = header_font
+    ws.cell(row, 1).alignment = left
+    row += 1
+
+    # --- Row 6: Table headers ---
+    headers = [
+        '№ п/п',
+        'Назва Товару',
+        'Розрахункова ціна за одиницю Товару, грн',
+        'Розмір наданої знижки',
+        'Кількість упаковок Товару, проданого Виконавцем у період',
+        'Період проведення акції (місяць і рік)',
+        'Вартість послуг, грн'
+    ]
+
+    for col_idx, header in enumerate(headers, 1):
+        cell = ws.cell(row, col_idx, header)
+        cell.font = header_font
+        cell.alignment = center
+        cell.border = thin_border
+    ws.row_dimensions[row].height = 40
+    header_row = row
+    row += 1
+
+    # --- Get all SKUs for this category ---
+    sku_data = get_all_sku_for_category(template_brands)
+
+    # --- Try to get PRICE_CP from MHL data for each SKU ---
+    # Build a map of SKU -> PRICE_CP from MHL data
+    mhl_price_map = {}
+    mhl_supply_map = {}  # placeholder for future "sold by executor"
+
+    if mhl_df is not None and not mhl_df.empty:
+        sku_col = 'SKU_UA' if 'SKU_UA' in mhl_df.columns else 'Назва товару'
+        work_df = mhl_df.copy()
+        # Filter to relevant SKUs
+        allowed_skus = {str(v).strip().casefold() for v in (get_mhl_lik_sku() if is_lic else get_mhl_dd_sku())}
+        sku_values = work_df[sku_col].fillna('').astype(str).str.strip().str.casefold()
+        work_df = work_df[sku_values.isin(allowed_skus)].copy()
+
+        if not work_df.empty:
+            for column in ['PRICE_CP', 'SUPPLY']:
+                work_df[column] = pd.to_numeric(work_df[column], errors='coerce')
+
+            # Get latest PRICE_CP per SKU
+            for _, mhl_row in work_df.iterrows():
+                sku_name = str(mhl_row.get(sku_col, '')).strip()
+                if sku_name:
+                    if pd.notna(mhl_row.get('PRICE_CP')):
+                        mhl_price_map[sku_name.casefold()] = mhl_row['PRICE_CP']
+                    if pd.notna(mhl_row.get('SUPPLY')):
+                        # This is SUPPLY (purchased by network), not sold by executor
+                        # But we'll use it as placeholder until proper field exists
+                        mhl_supply_map[sku_name.casefold()] = mhl_row['SUPPLY']
+
+    # --- Data rows ---
+    data_start_row = row
+    service_values = []  # Store calculated service values for total
+
+    for idx, sku_info in enumerate(sku_data, 1):
+        sku_name = sku_info['sku']
+        brand = sku_info['brand']
+        base_price = sku_info['price']  # From SERVICE_PRICES (fixed price per brand)
+
+        # Get PRICE_CP from MHL data (actual purchase price), fallback to base_price
+        price_cp = mhl_price_map.get(sku_name.casefold(), base_price)
+
+        # Discount - placeholder 0%
+        discount_pct = 0.0
+
+        # Quantity sold by executor - placeholder 0.00
+        # TODO: Replace with actual "sold by executor" field from DB when available
+        qty_sold = 0.0
+        # For now, can optionally use SUPPLY from MHL as placeholder:
+        # qty_sold = mhl_supply_map.get(sku_name.casefold(), 0.0)
+
+        # Period for column 6
+        period_display = f'{end_last_day.month:02d}.{end_last_day.year}'
+
+        # Calculate service cost: price_cp * qty_sold * discount_pct / 100
+        service_cost = round(price_cp * qty_sold * discount_pct / 100, 2) if discount_pct > 0 and qty_sold > 0 else 0.0
+        service_values.append(service_cost)
+
+        # Write row
+        ws.cell(row, 1, idx).font = normal_font
+        ws.cell(row, 1).alignment = center
+        ws.cell(row, 1).border = thin_border
+
+        ws.cell(row, 2, sku_name).font = normal_font
+        ws.cell(row, 2).alignment = left
+        ws.cell(row, 2).border = thin_border
+
+        ws.cell(row, 3, round(price_cp, 2)).font = normal_font
+        ws.cell(row, 3).alignment = right
+        ws.cell(row, 3).border = thin_border
+        ws.cell(row, 3).number_format = '#,##0.00'
+
+        ws.cell(row, 4, f'{discount_pct:.2f}%').font = normal_font
+        ws.cell(row, 4).alignment = center
+        ws.cell(row, 4).border = thin_border
+
+        ws.cell(row, 5, round(qty_sold, 2)).font = normal_font
+        ws.cell(row, 5).alignment = center
+        ws.cell(row, 5).border = thin_border
+        ws.cell(row, 5).number_format = '#,##0.00'
+
+        ws.cell(row, 6, period_display).font = normal_font
+        ws.cell(row, 6).alignment = center
+        ws.cell(row, 6).border = thin_border
+
+        ws.cell(row, 7, service_cost).font = normal_font
+        ws.cell(row, 7).alignment = right
+        ws.cell(row, 7).border = thin_border
+        ws.cell(row, 7).number_format = '#,##0.00'
+
+        row += 1
+
+    data_end_row = row - 1
+
+    # --- Summary rows ---
+
+    # 1. Всього вартість послуг, грн., без ПДВ
+    total_services = round(sum(service_values), 2)
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=6)
+    ws.cell(row, 1, 'Всього вартість послуг, грн., без ПДВ').font = bold_font
+    ws.cell(row, 1).alignment = left
+    ws.cell(row, 1).border = thin_border
+    for c in range(2, 7):
+        ws.cell(row, c).border = thin_border
+    ws.cell(row, 7, total_services).font = bold_font
+    ws.cell(row, 7).alignment = right
+    ws.cell(row, 7).border = thin_border
+    ws.cell(row, 7).number_format = '#,##0.00'
+    total_services_row = row
+    row += 1
+
+    # 2. Вартість послуг із авторизації, грн., без ПДВ
+    auth_amount = get_tma_auth_amount(selected_pharmacy, is_lic)
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=6)
+    ws.cell(row, 1, 'Вартість послуг із авторизації, грн., без ПДВ').font = bold_font
+    ws.cell(row, 1).alignment = left
+    ws.cell(row, 1).border = thin_border
+    for c in range(2, 7):
+        ws.cell(row, c).border = thin_border
+    ws.cell(row, 7, auth_amount).font = bold_font
+    ws.cell(row, 7).alignment = right
+    ws.cell(row, 7).border = thin_border
+    ws.cell(row, 7).number_format = '#,##0.00'
+    auth_row = row
+    row += 1
+
+    # 3. Всього без ПДВ (text under "Період" column, value under "Вартість послуг")
+    subtotal_no_vat = round(total_services + auth_amount, 2)
+    # Text in column 6 (Період)
+    ws.cell(row, 6, 'Всього без ПДВ').font = bold_font
+    ws.cell(row, 6).alignment = right
+    ws.cell(row, 6).border = thin_border
+    # Value in column 7
+    ws.cell(row, 7, subtotal_no_vat).font = bold_font
+    ws.cell(row, 7).alignment = right
+    ws.cell(row, 7).border = Border(
+        left=Side(style='thin'), right=Side(style='thin'),
+        top=Side(style='thin'), bottom=Side(style='double')
+    )
+    ws.cell(row, 7).number_format = '#,##0.00'
+    # Empty borders for columns 1-5
+    for c in range(1, 6):
+        if c != 6:
+            ws.cell(row, c).border = thin_border
+    subtotal_row = row
+    row += 1
+
+    # 4. ПДВ 20%
+    vat_amount = round(subtotal_no_vat * 0.2, 2)
+    ws.cell(row, 6, 'ПДВ 20%').font = bold_font
+    ws.cell(row, 6).alignment = right
+    ws.cell(row, 6).border = thin_border
+    ws.cell(row, 7, vat_amount).font = bold_font
+    ws.cell(row, 7).alignment = right
+    ws.cell(row, 7).border = Border(
+        left=Side(style='thin'), right=Side(style='thin'),
+        top=Side(style='thin'), bottom=Side(style='double')
+    )
+    ws.cell(row, 7).number_format = '#,##0.00'
+    for c in range(1, 6):
+        if c != 6:
+            ws.cell(row, c).border = thin_border
+    row += 1
+
+    # 5. Разом з ПДВ
+    total_with_vat = round(subtotal_no_vat + vat_amount, 2)
+    ws.cell(row, 6, 'Разом з ПДВ').font = bold_font
+    ws.cell(row, 6).alignment = right
+    ws.cell(row, 6).border = thin_border
+    ws.cell(row, 7, total_with_vat).font = bold_font
+    ws.cell(row, 7).alignment = right
+    ws.cell(row, 7).border = Border(
+        left=Side(style='thin'), right=Side(style='thin'),
+        top=Side(style='thin'), bottom=Side(style='double')
+    )
+    ws.cell(row, 7).number_format = '#,##0.00'
+    for c in range(1, 6):
+        if c != 6:
+            ws.cell(row, c).border = thin_border
+
+    # --- Column widths ---
+    ws.column_dimensions['A'].width = 8
+    ws.column_dimensions['B'].width = 50
+    ws.column_dimensions['C'].width = 25
+    ws.column_dimensions['D'].width = 18
+    ws.column_dimensions['E'].width = 35
+    ws.column_dimensions['F'].width = 22
+    ws.column_dimensions['G'].width = 20
+
+    ws.title = f'під час акції ({act_type})'
+
+
+# Legacy empty sheet function (kept for compatibility if needed)
 def create_empty_tma_sheet(ws, is_lic=True):
     """Create empty під час акції sheet with just the name."""
     act_type = "ЛІК" if is_lic else "ДД"
@@ -1065,16 +1427,38 @@ def generate_excel_report(
                         df_req=df_req, selected_pharmacy=selected_pharmacy)
 
     # ============================================================
-    # SHEET 5: під час акції (ЛІК) - empty
+    # SHEET 5: під час акції (ЛІК) — full TMA report
     # ============================================================
     ws_tma_lik = wb.create_sheet(title='під час акції (ЛІК)')
-    create_empty_tma_sheet(ws_tma_lik, is_lic=True)
+    fill_tma_worksheet(
+        ws=ws_tma_lik,
+        template_brands=LIK_BRANDS_TEMPLATE,
+        period_start=period_start,
+        period_end=period_end,
+        executor_name=executor_name,
+        contract_no=contract_no,
+        contract_date=contract_date,
+        selected_pharmacy=selected_pharmacy,
+        mhl_df=mhl_df,
+        is_lic=True
+    )
 
     # ============================================================
-    # SHEET 6: під час акції (ДД) - empty
+    # SHEET 6: під час акції (ДД) — full TMA report
     # ============================================================
     ws_tma_dd = wb.create_sheet(title='під час акції (ДД)')
-    create_empty_tma_sheet(ws_tma_dd, is_lic=False)
+    fill_tma_worksheet(
+        ws=ws_tma_dd,
+        template_brands=DD_BRANDS_TEMPLATE,
+        period_start=period_start,
+        period_end=period_end,
+        executor_name=executor_name,
+        contract_no=contract_no,
+        contract_date=contract_date,
+        selected_pharmacy=selected_pharmacy,
+        mhl_df=mhl_df,
+        is_lic=False
+    )
 
     # Remove default sheet
     if default_sheet.title in wb.sheetnames and len(wb.sheetnames) > 1:

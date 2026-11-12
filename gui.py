@@ -16,6 +16,8 @@ from convertor import (
     get_mhl_dd_sku,
     get_all_skus_with_status,
     set_sku_active,
+    get_tma_auth_amount,
+    set_tma_auth_amount,
 )
 from Data.Controller import get_mhl_data, get_pharmacy_data, load_requisites_file
 
@@ -118,6 +120,10 @@ class ReportApp:
         self.pharmacy_name_var = tk.StringVar(value='')
         self.year_var = tk.StringVar(value=str(datetime.now().year))
         self.month_var = tk.StringVar(value=f'{datetime.now().month:02d}')
+
+        # TMA Authorization amounts (per network, separate for ЛИК/ДД)
+        self.tma_auth_lik_var = tk.StringVar(value='0.00')
+        self.tma_auth_dd_var = tk.StringVar(value='0.00')
 
         # Auto-detect requisites on startup
         self._auto_detect_requisites()
@@ -246,9 +252,55 @@ class ReportApp:
         )
         self.month_combo.grid(row=2, column=1, sticky='w', pady=(0, 8))
 
+        # TMA Authorization card
+        tma_card = Card(main, padx=20, pady=16)
+        tma_card.grid(row=4, column=0, sticky='ew', pady=(0, 16))
+        tma_card.columnconfigure(1, weight=1)
+        tma_card.columnconfigure(3, weight=1)
+
+        tk.Label(
+            tma_card,
+            text='ТМA Авторизація (вартість послуг із авторизації, без ПДВ)',
+            font=FONT_SUBTITLE,
+            bg=CARD_BG,
+            fg=TEXT_MAIN
+        ).grid(row=0, column=0, columnspan=4, sticky='w', pady=(0, 8))
+
+        # ЛИК field
+        tk.Label(tma_card, text='ЛІК', font=FONT_BODY, bg=CARD_BG, fg=TEXT_MUTED).grid(row=1, column=0, sticky='w', padx=(0, 10))
+        self.tma_auth_lik_entry = tk.Entry(
+            tma_card,
+            textvariable=self.tma_auth_lik_var,
+            font=FONT_BODY,
+            relief='solid',
+            bd=1,
+            highlightthickness=1,
+            highlightcolor=PRIMARY,
+            highlightbackground=BORDER,
+            width=15
+        )
+        self.tma_auth_lik_entry.grid(row=1, column=1, sticky='w', padx=(0, 20))
+        self.tma_auth_lik_entry.bind('<FocusOut>', lambda e: self._save_tma_auth())
+
+        # ДД field
+        tk.Label(tma_card, text='ДД', font=FONT_BODY, bg=CARD_BG, fg=TEXT_MUTED).grid(row=1, column=2, sticky='w', padx=(0, 10))
+        self.tma_auth_dd_entry = tk.Entry(
+            tma_card,
+            textvariable=self.tma_auth_dd_var,
+            font=FONT_BODY,
+            relief='solid',
+            bd=1,
+            highlightthickness=1,
+            highlightcolor=PRIMARY,
+            highlightbackground=BORDER,
+            width=15
+        )
+        self.tma_auth_dd_entry.grid(row=1, column=3, sticky='w')
+        self.tma_auth_dd_entry.bind('<FocusOut>', lambda e: self._save_tma_auth())
+
         # Action buttons
         actions = tk.Frame(main, bg=BG_COLOR)
-        actions.grid(row=4, column=0, sticky='ew', pady=(8, 16))
+        actions.grid(row=5, column=0, sticky='ew', pady=(8, 16))
         actions.columnconfigure(0, weight=1)
 
         self.load_button = ModernButton(
@@ -275,7 +327,7 @@ class ReportApp:
         # Status bar
         self.status_var = tk.StringVar(value='Готово до роботи')
         status_bar = tk.Frame(main, bg=CARD_BG, highlightbackground=BORDER, highlightthickness=1)
-        status_bar.grid(row=5, column=0, sticky='ew', pady=(16, 0))
+        status_bar.grid(row=6, column=0, sticky='ew', pady=(16, 0))
         status_bar.columnconfigure(0, weight=1)
 
         self.status_label = tk.Label(
@@ -297,8 +349,34 @@ class ReportApp:
         self.progress.grid(row=0, column=1, padx=12, pady=8)
 
     def _on_pharmacy_change(self):
-        """Called when pharmacy selection changes."""
-        pass  # Can add validation here if needed
+        """Called when pharmacy selection changes - load TMA auth values."""
+        self._load_tma_auth()
+
+    def _load_tma_auth(self):
+        """Load TMA authorization amounts for selected pharmacy."""
+        pharmacy = self.pharmacy_name_var.get().strip()
+        if pharmacy:
+            lik_amount = get_tma_auth_amount(pharmacy, is_lic=True)
+            dd_amount = get_tma_auth_amount(pharmacy, is_lic=False)
+            self.tma_auth_lik_var.set(f'{lik_amount:.2f}')
+            self.tma_auth_dd_var.set(f'{dd_amount:.2f}')
+        else:
+            self.tma_auth_lik_var.set('0.00')
+            self.tma_auth_dd_var.set('0.00')
+
+    def _save_tma_auth(self):
+        """Save TMA authorization amounts for selected pharmacy."""
+        pharmacy = self.pharmacy_name_var.get().strip()
+        if not pharmacy:
+            return
+        try:
+            lik_amount = float(self.tma_auth_lik_var.get() or 0)
+            dd_amount = float(self.tma_auth_dd_var.get() or 0)
+            set_tma_auth_amount(pharmacy, True, lik_amount)
+            set_tma_auth_amount(pharmacy, False, dd_amount)
+            self.status_var.set(f'Збережено ТМА авторизацію для {pharmacy}: ЛІК={lik_amount:.2f}, ДД={dd_amount:.2f}')
+        except ValueError:
+            pass  # Invalid input, ignore
 
     def _get_period_range(self):
         """Get period start/end as YYYY-MM-DD for the selected month/year."""
@@ -434,6 +512,8 @@ class ReportApp:
                 self.pharmacy_combo['values'] = tuple(unique_chains)
                 if unique_chains:
                     self.pharmacy_combo.current(0)
+                    # Load TMA auth for the first selected pharmacy
+                    self._load_tma_auth()
                 self.status_var.set(
                     f'Завантажено мереж з реквізитів: {len(unique_chains)}'
                 )
