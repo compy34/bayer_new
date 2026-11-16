@@ -1333,10 +1333,10 @@ def fill_tma_worksheet(ws, template_brands, period_start, period_end, executor_n
     ws.cell(sig_start_row, 1, line1_text).font = normal_font
     ws.cell(sig_start_row, 1).alignment = left
 
-    # Line 2: Director signature (right-aligned)
+    # Line 2: Director signature (right-aligned) - only name, no "Директор:" prefix
     ws.merge_cells(start_row=sig_start_row + 1, start_column=1, end_row=sig_start_row + 1, end_column=7)
     director_font = Font(bold=True, size=12)
-    director_text = f'Директор: {director_name}' if director_name else 'Директор: ____________________'
+    director_text = director_name if director_name else '____________________'
     ws.cell(sig_start_row + 1, 1, director_text).font = director_font
     ws.cell(sig_start_row + 1, 1).alignment = right
 
