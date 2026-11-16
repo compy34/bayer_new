@@ -975,7 +975,7 @@ def get_all_sku_for_category(template_brands):
 
 
 def fill_tma_worksheet(ws, template_brands, period_start, period_end, executor_name,
-                       contract_no, contract_date, selected_pharmacy, mhl_df, is_lic=True):
+                       contract_no, contract_date, selected_pharmacy, mhl_df, is_lic=True, df_req=None):
     """Fill 'Під час акції' sheet with full TMA report structure."""
 
     thin_border = Border(
@@ -1244,6 +1244,118 @@ def fill_tma_worksheet(ws, template_brands, period_start, period_end, executor_n
         if c != 6:
             ws.cell(row, c).border = thin_border
 
+    # ============================================================
+    # PHOTO SECTION (Фотопідтвердження)
+    # ============================================================
+    photo_start_row = row + 2
+
+    # Header for photo section
+    ws.merge_cells(start_row=photo_start_row, start_column=1, end_row=photo_start_row, end_column=7)
+    ws.cell(photo_start_row, 1, 'Фотопідтвердження наданих послуг за звітний період.').font = header_font
+    ws.cell(photo_start_row, 1).alignment = center
+    ws.row_dimensions[photo_start_row].height = 30
+
+    # 6 photo placeholders in 3x2 grid
+    # Each photo spans ~2-3 columns, 2 rows of photos
+    photo_grid_start = photo_start_row + 1
+    photo_height = 60  # Height for each photo row
+
+    # Column layout: 7 columns total
+    # Photo 1: A-B, Photo 2: C-D, Photo 3: E-F (G for spacing/border)
+    # Photo 4: A-B, Photo 5: C-D, Photo 6: E-F
+    photo_cols = [
+        (1, 2),   # Photo 1: cols A-B
+        (3, 4),   # Photo 2: cols C-D
+        (5, 6),   # Photo 3: cols E-F
+        (1, 2),   # Photo 4: cols A-B
+        (3, 4),   # Photo 5: cols C-D
+        (5, 6),   # Photo 6: cols E-F
+    ]
+
+    for i, (start_col, end_col) in enumerate(photo_cols):
+        row_idx = photo_grid_start + (i // 3) * 3  # Each photo takes 2 rows + 1 gap
+        if i >= 3:
+            row_idx = photo_grid_start + 3  # Second row of photos starts 3 rows below first
+
+        # Merge cells for photo placeholder
+        ws.merge_cells(start_row=row_idx, start_column=start_col, end_row=row_idx + 1, end_column=end_col)
+
+        photo_cell = ws.cell(row_idx, start_col)
+        photo_num = i + 1
+        photo_cell.value = f'[Фото {photo_num}]'
+        photo_cell.font = Font(size=11, color='808080', italic=True)
+        photo_cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+
+        # Add border around photo placeholder
+        for r in range(row_idx, row_idx + 2):
+            for c in range(start_col, end_col + 1):
+                cell = ws.cell(r, c)
+                cell.border = thin_border
+                if r == row_idx and c == start_col:
+                    cell.value = f'[Фото {photo_num}]'
+                    cell.font = Font(size=11, color='808080', italic=True)
+                    cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+
+        ws.row_dimensions[row_idx].height = photo_height
+        ws.row_dimensions[row_idx + 1].height = photo_height
+
+    # ============================================================
+    # SIGNATURE / REQUISITES SECTION (під час акції)
+    # ============================================================
+    sig_start_row = photo_grid_start + 6  # After 2 rows of photos (3 rows each)
+
+    # Extract director and BAM from requisites for selected pharmacy
+    director_name = ''
+    bam_name = ''
+    if df_req is not None and not df_req.empty and selected_pharmacy:
+        clean_selected = str(selected_pharmacy).strip()
+        target_col = None
+        for col_candidate in ['chain_name', 'Клиент из базы данных', 'Мережа', 'Назва']:
+            if col_candidate in df_req.columns:
+                target_col = col_candidate
+                break
+        if clean_selected and clean_selected != 'Усі аптеки' and target_col:
+            filtered_req = df_req[
+                df_req[target_col].astype(str).str.strip().str.lower()
+                == clean_selected.lower()
+            ]
+            if not filtered_req.empty:
+                matched_row = filtered_req.iloc[0]
+                director_name = str(matched_row.get('Директор', matched_row.get('директор', ''))).strip()
+                # Try to get BAM (Business Area Manager) from requisites
+                bam_name = str(matched_row.get('BAM', matched_row.get('БАМ', matched_row.get('bam', '')))).strip()
+
+    act_type = "ЛІК" if is_lic else "ДД"
+
+    # Line 1: "Цей Звіт є невід'ємною частиною Акта{ЛІК|ДД} №__________ про надання послуг від {date}"
+    ws.merge_cells(start_row=sig_start_row, start_column=1, end_row=sig_start_row, end_column=7)
+    line1_text = f'Цей Звіт є невід\'ємною частиною Акта {act_type} №__________ про надання послуг від {period_end_ukrainian}'
+    ws.cell(sig_start_row, 1, line1_text).font = normal_font
+    ws.cell(sig_start_row, 1).alignment = left
+
+    # Line 2: Director signature (right-aligned)
+    ws.merge_cells(start_row=sig_start_row + 1, start_column=1, end_row=sig_start_row + 1, end_column=7)
+    director_font = Font(bold=True, size=12)
+    director_text = f'Директор: {director_name}' if director_name else 'Директор: ____________________'
+    ws.cell(sig_start_row + 1, 1, director_text).font = director_font
+    ws.cell(sig_start_row + 1, 1).alignment = right
+
+    # Line 3: "Від Замовника" (left, bold)
+    ws.merge_cells(start_row=sig_start_row + 2, start_column=1, end_row=sig_start_row + 2, end_column=7)
+    ws.cell(sig_start_row + 2, 1, 'Від Замовника').font = header_font
+    ws.cell(sig_start_row + 2, 1).alignment = left
+
+    # Line 4: "Перевірено" (left, bold)
+    ws.merge_cells(start_row=sig_start_row + 3, start_column=1, end_row=sig_start_row + 3, end_column=7)
+    ws.cell(sig_start_row + 3, 1, 'Перевірено').font = header_font
+    ws.cell(sig_start_row + 3, 1).alignment = left
+
+    # Line 5: "Менеджер з питань регіонального розвитку бізнесу {БАМ з реквізитів}" (left)
+    ws.merge_cells(start_row=sig_start_row + 4, start_column=1, end_row=sig_start_row + 4, end_column=7)
+    bam_text = f'Менеджер з питань регіонального розвитку бізнесу {bam_name}' if bam_name else 'Менеджер з питань регіонального розвитку бізнесу ____________________'
+    ws.cell(sig_start_row + 4, 1, bam_text).font = normal_font
+    ws.cell(sig_start_row + 4, 1).alignment = left
+
     # --- Column widths ---
     ws.column_dimensions['A'].width = 8
     ws.column_dimensions['B'].width = 50
@@ -1440,7 +1552,8 @@ def generate_excel_report(
         contract_date=contract_date,
         selected_pharmacy=selected_pharmacy,
         mhl_df=mhl_df,
-        is_lic=True
+        is_lic=True,
+        df_req=df_req
     )
 
     # ============================================================
@@ -1457,7 +1570,8 @@ def generate_excel_report(
         contract_date=contract_date,
         selected_pharmacy=selected_pharmacy,
         mhl_df=mhl_df,
-        is_lic=False
+        is_lic=False,
+        df_req=df_req
     )
 
     # Remove default sheet
