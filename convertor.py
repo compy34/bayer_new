@@ -2,7 +2,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 from openpyxl.styles import Alignment, Border, Font, Side
 from openpyxl.utils import get_column_letter
-from act_generator import generate_act_sheet
+from act_generator import generate_act_sheet, generate_tma_act_sheet
 
 
 def format_date_ukrainian(date_str):
@@ -1367,6 +1367,15 @@ def fill_tma_worksheet(ws, template_brands, period_start, period_end, executor_n
 
     ws.title = f'під час акції ({act_type})'
 
+    # Return calculated amounts for ACT_TMA sheet
+    return {
+        'total_services': total_services,
+        'auth_amount': auth_amount,
+        'subtotal_no_vat': subtotal_no_vat,
+        'vat_amount': vat_amount,
+        'total_with_vat': total_with_vat
+    }
+
 
 # Legacy empty sheet function (kept for compatibility if needed)
 def create_empty_tma_sheet(ws, is_lic=True):
@@ -1389,13 +1398,15 @@ def generate_excel_report(
         selected_pharmacy='Усі аптеки',
         mhl_df=None,
 ):
-    """Generate Excel report with 6 sheets matching template exactly:
+    """Generate Excel report with 8 sheets matching template exactly:
     1. акт_ЛІК
     2. акт_ДД
     3. звіт викладка+MHL(ЛІК)
     4. звіт викладка+MHL(ДД)
-    5. під час акції (ЛІК) - empty
-    6. під час акції (ДД) - empty
+    5. під час акції (ЛІК)
+    6. під час акції (ДД)
+    7. АКТ_ТМА_ЛІК
+    8. АКТ_ТМА_ДД
     """
     if (df is None or df.empty) and (mhl_df is None or mhl_df.empty):
         return
@@ -1542,7 +1553,7 @@ def generate_excel_report(
     # SHEET 5: під час акції (ЛІК) — full TMA report
     # ============================================================
     ws_tma_lik = wb.create_sheet(title='під час акції (ЛІК)')
-    fill_tma_worksheet(
+    tma_lik_amounts = fill_tma_worksheet(
         ws=ws_tma_lik,
         template_brands=LIK_BRANDS_TEMPLATE,
         period_start=period_start,
@@ -1560,7 +1571,7 @@ def generate_excel_report(
     # SHEET 6: під час акції (ДД) — full TMA report
     # ============================================================
     ws_tma_dd = wb.create_sheet(title='під час акції (ДД)')
-    fill_tma_worksheet(
+    tma_dd_amounts = fill_tma_worksheet(
         ws=ws_tma_dd,
         template_brands=DD_BRANDS_TEMPLATE,
         period_start=period_start,
@@ -1572,6 +1583,42 @@ def generate_excel_report(
         mhl_df=mhl_df,
         is_lic=False,
         df_req=df_req
+    )
+
+    # ============================================================
+    # SHEET 7: АКТ_ТМА_ЛІК
+    # ============================================================
+    ws_akt_tma_lik = wb.create_sheet(title='АКТ_ТМА_ЛІК')
+    generate_tma_act_sheet(
+        ws=ws_akt_tma_lik,
+        df_req=df_req,
+        tma_calculated_sum=tma_lik_amounts['total_services'] if tma_lik_amounts else 0,
+        period_start=period_start,
+        period_end=period_end,
+        selected_pharmacy=selected_pharmacy,
+        act_number='3',
+        contract_no=contract_no,
+        contract_date=contract_date,
+        executor_name=executor_name,
+        is_lic=True
+    )
+
+    # ============================================================
+    # SHEET 8: АКТ_ТМА_ДД
+    # ============================================================
+    ws_akt_tma_dd = wb.create_sheet(title='АКТ_ТМА_ДД')
+    generate_tma_act_sheet(
+        ws=ws_akt_tma_dd,
+        df_req=df_req,
+        tma_calculated_sum=tma_dd_amounts['total_services'] if tma_dd_amounts else 0,
+        period_start=period_start,
+        period_end=period_end,
+        selected_pharmacy=selected_pharmacy,
+        act_number='4',
+        contract_no=contract_no,
+        contract_date=contract_date,
+        executor_name=executor_name,
+        is_lic=False
     )
 
     # Remove default sheet
