@@ -82,6 +82,10 @@ MHL_REWARD_MULTIPLIER = 0.1
 # Default file: MHL_Q3'2026.xlsx, sheet "для договору", columns: SKU_UKR -> Q3'26, %
 MHL_ACTION_PERCENT_FILE = "MHL_Q3'2026.xlsx"
 
+# LA_Price file path (service prices per brand)
+# Default: LA_Price.xlsx, sheet "LA_Price" or first sheet, columns: Brand, Price
+LA_PRICE_FILE = "LA_Price.xlsx"
+
 # Database connection
 DB_CONNECTION_STRING = (
     r'DRIVER={SQL Server Native Client 11.0};'

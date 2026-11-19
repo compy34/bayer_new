@@ -16,6 +16,7 @@ from config import (
     DD_BRANDS_TEMPLATE,
     MHL_REWARD_MULTIPLIER,
     MHL_ACTION_PERCENT_FILE,
+    LA_PRICE_FILE,
 )
 from convertor import (
     build_report_dataframe,
@@ -34,6 +35,10 @@ from convertor import (
     set_penetration_target,
     load_mhl_action_percents,
     set_mhl_action_percent_file,
+    load_la_price,
+    set_la_price_file,
+    get_all_la_prices,
+    set_la_price,
 )
 from Data.Controller import get_mhl_data, get_pharmacy_data, load_requisites_file, get_tma_offtake_data, DataLoadError
 
@@ -697,52 +702,94 @@ class SettingsDialog(tk.Toplevel):
             self._refresh_targets_table()
 
     def _build_tma_settings_tab(self, parent):
-        """TMA Settings - action percent file path."""
+        """TMA Settings - action percent file path and LA_Price file path."""
         tk.Label(
             parent,
-            text='Налаштування для аркушів "під час акції" (ТМА).\nФайл з відсотками акції: аркуш "для договору", колонки SKU_UKR та Q3\'26, %.',
+            text='Налаштування для аркушів "під час акції" (ТМА).',
             font=FONT_SMALL, bg=BG_COLOR, fg=TEXT_MUTED, wraplength=600, justify='left'
         ).pack(anchor='w', pady=(0, PAD_Y))
 
-        # File path setting
-        file_frame = tk.Frame(parent, bg=BG_COLOR)
-        file_frame.pack(fill='x', pady=(0, PAD_Y))
-        file_frame.columnconfigure(1, weight=1)
+        # --- MHL Action Percent File ---
+        tk.Label(parent, text='Файл відсотків акції (MHL):', font=FONT_SUBTITLE, bg=BG_COLOR, fg=TEXT_MAIN).pack(anchor='w', pady=(PAD_Y, 4))
+        tk.Label(parent, text='Аркуш "для договору", колонки: SKU_UKR та Q3\'26, %', font=FONT_SMALL, bg=BG_COLOR, fg=TEXT_MUTED).pack(anchor='w', pady=(0, PAD_Y))
 
-        tk.Label(file_frame, text='Файл відсотків акції:', font=FONT_BODY, bg=BG_COLOR, fg=TEXT_MAIN).grid(row=0, column=0, sticky='w', padx=(0, 10))
+        mhl_file_frame = tk.Frame(parent, bg=BG_COLOR)
+        mhl_file_frame.pack(fill='x', pady=(0, PAD_Y))
+        mhl_file_frame.columnconfigure(1, weight=1)
+
+        tk.Label(mhl_file_frame, text='Файл:', font=FONT_BODY, bg=BG_COLOR, fg=TEXT_MAIN).grid(row=0, column=0, sticky='w', padx=(0, 10))
         self.mhl_action_file_var = tk.StringVar(value=MHL_ACTION_PERCENT_FILE)
-        file_entry = tk.Entry(file_frame, textvariable=self.mhl_action_file_var,
-                               font=FONT_BODY, relief='solid', bd=1,
-                               highlightthickness=1, highlightcolor=BORDER_FOCUS, highlightbackground=BORDER)
-        file_entry.grid(row=0, column=1, sticky='ew', padx=(0, 10))
-
-        ModernButton(file_frame, text='Обрати...', style='outline',
+        mhl_file_entry = tk.Entry(mhl_file_frame, textvariable=self.mhl_action_file_var,
+                                   font=FONT_BODY, relief='solid', bd=1,
+                                   highlightthickness=1, highlightcolor=BORDER_FOCUS, highlightbackground=BORDER)
+        mhl_file_entry.grid(row=0, column=1, sticky='ew', padx=(0, 10))
+        ModernButton(mhl_file_frame, text='Обрати...', style='outline',
                     command=self._select_mhl_action_file).grid(row=0, column=2, sticky='e')
 
-        # Reload button
-        btn_frame = tk.Frame(parent, bg=BG_COLOR)
-        btn_frame.pack(fill='x', pady=(0, PAD_Y))
-        ModernButton(btn_frame, text='🔄 Перезавантажити файл', style='primary',
+        mhl_btn_frame = tk.Frame(parent, bg=BG_COLOR)
+        mhl_btn_frame.pack(fill='x', pady=(0, PAD_Y))
+        ModernButton(mhl_btn_frame, text='🔄 Перезавантажити файл відсотків', style='primary',
                     command=self._reload_mhl_action_file).pack(side='left')
-        ModernButton(btn_frame, text='📋 Показати завантажені відсотки', style='secondary',
+        ModernButton(mhl_btn_frame, text='📋 Показати завантажені відсотки', style='secondary',
                     command=self._show_mhl_action_percents).pack(side='left', padx=(10, 0))
 
-        # Preview area
-        preview_frame = tk.Frame(parent, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
-        preview_frame.pack(fill='both', expand=True)
-        preview_frame.grid_rowconfigure(0, weight=1)
-        preview_frame.grid_columnconfigure(0, weight=1)
+        # MHL Preview area
+        mhl_preview_frame = tk.Frame(parent, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
+        mhl_preview_frame.pack(fill='both', expand=True)
+        mhl_preview_frame.grid_rowconfigure(0, weight=1)
+        mhl_preview_frame.grid_columnconfigure(0, weight=1)
 
-        self.mhl_action_preview = tk.Text(preview_frame, font=FONT_MONO, bg=SURFACE, fg=TEXT_MAIN,
-                                           wrap='none', height=15, relief='flat', bd=0)
+        self.mhl_action_preview = tk.Text(mhl_preview_frame, font=FONT_MONO, bg=SURFACE, fg=TEXT_MAIN,
+                                           wrap='none', height=10, relief='flat', bd=0)
         self.mhl_action_preview.grid(row=0, column=0, sticky='nsew', padx=8, pady=8)
-        vsb = ttk.Scrollbar(preview_frame, orient='vertical', command=self.mhl_action_preview.yview)
-        hsb = ttk.Scrollbar(preview_frame, orient='horizontal', command=self.mhl_action_preview.xview)
+        vsb = ttk.Scrollbar(mhl_preview_frame, orient='vertical', command=self.mhl_action_preview.yview)
+        hsb = ttk.Scrollbar(mhl_preview_frame, orient='horizontal', command=self.mhl_action_preview.xview)
         self.mhl_action_preview.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
         vsb.grid(row=0, column=1, sticky='ns')
         hsb.grid(row=1, column=0, sticky='ew')
 
         self._refresh_mhl_action_preview()
+
+        # --- LA_Price File (Service Prices) ---
+        tk.Label(parent, text='Файл цін послуг (LA_Price):', font=FONT_SUBTITLE, bg=BG_COLOR, fg=TEXT_MAIN).pack(anchor='w', pady=(PAD_Y, 4))
+        tk.Label(parent, text='Аркуш "LA_Price" або перший аркуш, колонки: Brand та Price', font=FONT_SMALL, bg=BG_COLOR, fg=TEXT_MUTED).pack(anchor='w', pady=(0, PAD_Y))
+
+        la_file_frame = tk.Frame(parent, bg=BG_COLOR)
+        la_file_frame.pack(fill='x', pady=(0, PAD_Y))
+        la_file_frame.columnconfigure(1, weight=1)
+
+        tk.Label(la_file_frame, text='Файл:', font=FONT_BODY, bg=BG_COLOR, fg=TEXT_MAIN).grid(row=0, column=0, sticky='w', padx=(0, 10))
+        self.la_price_file_var = tk.StringVar(value=LA_PRICE_FILE)
+        la_file_entry = tk.Entry(la_file_frame, textvariable=self.la_price_file_var,
+                                  font=FONT_BODY, relief='solid', bd=1,
+                                  highlightthickness=1, highlightcolor=BORDER_FOCUS, highlightbackground=BORDER)
+        la_file_entry.grid(row=0, column=1, sticky='ew', padx=(0, 10))
+        ModernButton(la_file_frame, text='Обрати...', style='outline',
+                    command=self._select_la_price_file).grid(row=0, column=2, sticky='e')
+
+        la_btn_frame = tk.Frame(parent, bg=BG_COLOR)
+        la_btn_frame.pack(fill='x', pady=(0, PAD_Y))
+        ModernButton(la_btn_frame, text='🔄 Перезавантажити файл цін', style='primary',
+                    command=self._reload_la_price_file).pack(side='left')
+        ModernButton(la_btn_frame, text='📋 Показати завантажені ціни', style='secondary',
+                    command=self._show_la_prices).pack(side='left', padx=(10, 0))
+
+        # LA_Price Preview area
+        la_preview_frame = tk.Frame(parent, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
+        la_preview_frame.pack(fill='both', expand=True)
+        la_preview_frame.grid_rowconfigure(0, weight=1)
+        la_preview_frame.grid_columnconfigure(0, weight=1)
+
+        self.la_price_preview = tk.Text(la_preview_frame, font=FONT_MONO, bg=SURFACE, fg=TEXT_MAIN,
+                                         wrap='none', height=10, relief='flat', bd=0)
+        self.la_price_preview.grid(row=0, column=0, sticky='nsew', padx=8, pady=8)
+        vsb2 = ttk.Scrollbar(la_preview_frame, orient='vertical', command=self.la_price_preview.yview)
+        hsb2 = ttk.Scrollbar(la_preview_frame, orient='horizontal', command=self.la_price_preview.xview)
+        self.la_price_preview.configure(yscrollcommand=vsb2.set, xscrollcommand=hsb2.set)
+        vsb2.grid(row=0, column=1, sticky='ns')
+        hsb2.grid(row=1, column=0, sticky='ew')
+
+        self._refresh_la_price_preview()
 
     def _select_mhl_action_file(self):
         filename = filedialog.askopenfilename(
@@ -808,6 +855,72 @@ class SettingsDialog(tk.Toplevel):
         self.mhl_action_preview.insert('end', f'Завантажено SKU: {len(percents)}\n\n')
         for sku, pct in sorted(percents.items()):
             self.mhl_action_preview.insert('end', f'{sku}: {pct:.2f}%\n')
+
+    # --- LA_Price Methods ---
+    def _select_la_price_file(self):
+        filename = filedialog.askopenfilename(
+            title='Виберіть файл цін послуг (LA_Price)',
+            initialdir=str(Path.cwd()),
+            filetypes=[('Excel', '*.xlsx *.xls'), ('Усі файли', '*.*')]
+        )
+        if filename:
+            self.la_price_file_var.set(filename)
+
+    def _reload_la_price_file(self):
+        filepath = self.la_price_file_var.get().strip()
+        if not filepath:
+            messagebox.showwarning('Попередження', 'Вкажіть шлях до файлу', parent=self)
+            return
+        try:
+            set_la_price_file(filepath)
+            self._refresh_la_price_preview()
+            self.app.status_var.set(f'Файл цін послуг завантажено: {filepath}')
+        except Exception as e:
+            messagebox.showerror('Помилка', f'Не вдалося завантажити файл: {e}', parent=self)
+
+    def _show_la_prices(self):
+        """Show loaded service prices in a separate window."""
+        from convertor import get_all_la_prices
+        filepath = self.la_price_file_var.get().strip()
+        prices = get_all_la_prices() if filepath else SERVICE_PRICES
+
+        win = tk.Toplevel(self)
+        win.title('Завантажені ціни послуг')
+        win.geometry('500x400')
+        win.configure(bg=BG_COLOR)
+
+        tree = ttk.Treeview(win, columns=('BRAND', 'PRICE'), show='headings')
+        tree.heading('BRAND', text='Бренд')
+        tree.heading('PRICE', text='Ціна (грн.)')
+        tree.column('BRAND', width=300, anchor='w')
+        tree.column('PRICE', width=150, anchor='e')
+
+        for brand, price in sorted(prices.items()):
+            tree.insert('', 'end', values=(brand, f'{price:.2f}'))
+
+        vsb = ttk.Scrollbar(win, orient='vertical', command=tree.yview)
+        tree.configure(yscrollcommand=vsb.set)
+        tree.grid(row=0, column=0, sticky='nsew', padx=PAD_X, pady=PAD_X)
+        vsb.grid(row=0, column=1, sticky='ns')
+        win.grid_rowconfigure(0, weight=1)
+        win.grid_columnconfigure(0, weight=1)
+
+        tk.Label(win, text=f'Всього брендів: {len(prices)}', font=FONT_SMALL, bg=BG_COLOR, fg=TEXT_MUTED).grid(row=1, column=0, sticky='w', padx=PAD_X, pady=(0, PAD_X))
+
+    def _refresh_la_price_preview(self):
+        from convertor import get_all_la_prices
+        filepath = self.la_price_file_var.get().strip()
+        prices = get_all_la_prices() if filepath else SERVICE_PRICES
+
+        self.la_price_preview.delete('1.0', 'end')
+        if not prices:
+            self.la_price_preview.insert('end', f'Файл не знайдено або порожній: {filepath}')
+            return
+
+        self.la_price_preview.insert('end', f'Файл: {filepath}\n')
+        self.la_price_preview.insert('end', f'Завантажено брендів: {len(prices)}\n\n')
+        for brand, price in sorted(prices.items()):
+            self.la_price_preview.insert('end', f'{brand}: {price:.2f} грн.\n')
 
 
 class ReportApp:

@@ -14,6 +14,7 @@ from config import (
     DEFAULT_EXECUTOR_NAME,
     MHL_REWARD_MULTIPLIER,
     MHL_ACTION_PERCENT_FILE,
+    LA_PRICE_FILE,
 )
 from chain_normalizer import normalize_chain_name, find_matching_chain
 
@@ -502,6 +503,123 @@ def set_mhl_action_percent_file(filepath):
 
 
 # ============================================================
+# LA_PRICE LOADER (service prices per brand)
+# ============================================================
+
+LA_PRICE_FILE = Path(__file__).resolve().parent / LA_PRICE_FILE
+_la_price_cache = None
+_la_price_lock = threading.Lock()
+
+
+def load_la_price(filepath=None):
+    """Load service prices from Excel file (LA_Price).
+
+    Expected file: LA_Price.xlsx (configurable)
+    Sheet: "LA_Price" or first sheet
+    Columns: Brand, Price (or Brand, Ціна)
+
+    Returns dict mapping Brand -> price (float)
+    """
+    global _la_price_cache
+
+    if _la_price_cache is not None:
+        return _la_price_cache
+
+    file_to_load = Path(filepath) if filepath else LA_PRICE_FILE
+
+    if not file_to_load.exists():
+        # Return default prices from config
+        _la_price_cache = SERVICE_PRICES.copy()
+        return _la_price_cache
+
+    try:
+        # Try to read "LA_Price" sheet first, then first sheet
+        try:
+            df = pd.read_excel(file_to_load, sheet_name='LA_Price', dtype=str)
+        except ValueError:
+            df = pd.read_excel(file_to_load, sheet_name=0, dtype=str)
+
+        # Normalize column names
+        df.columns = df.columns.astype(str).str.strip()
+
+        # Find Brand column
+        brand_col = None
+        for col in df.columns:
+            col_lower = col.strip().lower()
+            if col_lower in ['brand', 'бренд', 'назва', 'name']:
+                brand_col = col
+                break
+
+        # Find Price column
+        price_col = None
+        for col in df.columns:
+            col_lower = col.strip().lower()
+            if col_lower in ['price', 'ціна', 'price_uah', 'cost', 'вартість']:
+                price_col = col
+                break
+
+        if not brand_col or not price_col:
+            print(f"Warning: Required columns not found in LA_Price file. Columns: {list(df.columns)}")
+            _la_price_cache = SERVICE_PRICES.copy()
+            return _la_price_cache
+
+        # Build mapping: Brand -> price
+        _la_price_cache = {}
+        for _, row in df.iterrows():
+            brand = str(row.get(brand_col, '')).strip()
+            price_str = str(row.get(price_col, '')).strip()
+
+            if brand and price_str:
+                try:
+                    price_clean = price_str.replace(',', '.').replace(' ', '').strip()
+                    price_val = float(price_clean)
+                    _la_price_cache[brand] = price_val
+                except ValueError:
+                    continue
+
+        return _la_price_cache
+
+    except Exception as e:
+        print(f"Error loading LA_Price: {e}")
+        _la_price_cache = SERVICE_PRICES.copy()
+        return _la_price_cache
+
+
+def get_la_price(brand):
+    """Get service price for a brand.
+    Returns price as float, or default from SERVICE_PRICES if not found.
+    """
+    load_la_price()
+    if _la_price_cache is None:
+        return SERVICE_PRICES.get(brand, 0.0)
+    return _la_price_cache.get(brand, SERVICE_PRICES.get(brand, 0.0))
+
+
+def get_all_la_prices():
+    """Get all loaded service prices."""
+    load_la_price()
+    if _la_price_cache is None:
+        return SERVICE_PRICES.copy()
+    return _la_price_cache.copy()
+
+
+def set_la_price_file(filepath):
+    """Update the LA_Price file path and reload."""
+    global LA_PRICE_FILE, _la_price_cache
+    LA_PRICE_FILE = Path(filepath)
+    _la_price_cache = None  # Force reload
+    return load_la_price()
+
+
+def set_la_price(brand, price):
+    """Set/update a service price in memory (not persisted to file).
+    For persistence, edit the Excel file directly and reload.
+    """
+    load_la_price()
+    _la_price_cache[brand] = float(price)
+
+
+# ============================================================
 # HELPER FUNCTIONS
 # ============================================================
 
@@ -545,7 +663,7 @@ def build_pivot_for_report(df, template_brands):
     pivot_df = pivot_df[cols]
 
     # Add total sum column
-    price_dict = {b: SERVICE_PRICES.get(b, 0) for b in template_brands}
+    price_dict = {b: get_la_price(b) for b in template_brands}
     total_sum = 0
     for brand in template_brands:
         total_sum += pivot_df[brand] * price_dict.get(brand, 0)
@@ -745,7 +863,7 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
             cell.border = thin_border
             cell.number_format = '#,##0'
 
-            price = SERVICE_PRICES.get(brand, 0)
+            price = get_la_price(brand)
             row_total += qty * price
 
         # Total amount
@@ -1148,7 +1266,7 @@ def set_tma_auth_amount(chain_name, is_lic, amount):
 
 def get_all_sku_for_category(template_brands):
     """Get all SKUs for a category (ЛІК or ДД) from classification with their brands and prices."""
-    from convertor import get_mhl_lik_sku, get_mhl_dd_sku, SERVICE_PRICES, LIK_BRANDS_TEMPLATE, DD_BRANDS_TEMPLATE
+    from convertor import get_mhl_lik_sku, get_mhl_dd_sku, LIK_BRANDS_TEMPLATE, DD_BRANDS_TEMPLATE
 
     # Determine which category based on template brands
     is_lic = template_brands == LIK_BRANDS_TEMPLATE
@@ -1162,7 +1280,7 @@ def get_all_sku_for_category(template_brands):
     result = []
     for sku in sku_list:
         brand = get_sku_brand(sku)
-        price = SERVICE_PRICES.get(brand, 0.0)
+        price = get_la_price(brand)
         result.append({
             'sku': sku,
             'brand': brand,
@@ -1915,7 +2033,7 @@ def build_report_dataframe(df):
                 for brand in template_brands:
                     qty = row.get(brand, 0)
                     if qty > 0:
-                        price = SERVICE_PRICES.get(brand, 0)
+                        price = get_la_price(brand)
                         amount = round(qty * price, 2)
                         result_rows.append({
                             'Тип': brand_type,
