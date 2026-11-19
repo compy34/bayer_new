@@ -798,10 +798,6 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
         left=Side(style='thin'), right=Side(style='thin'),
         top=Side(style='thin'), bottom=Side(style='double')
     )
-    # Add empty borders for columns 1-5
-    for col in range(1, 6):
-        if col != 6:
-            ws.cell(mhl_subtotal_row, col).border = thin_border
 
     # VAT row (20% of reward) - label in column 6 (right-aligned before amount)
     mhl_vat_row = mhl_subtotal_row + 1
@@ -817,10 +813,6 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
         left=Side(style='thin'), right=Side(style='thin'),
         top=Side(style='thin'), bottom=Side(style='double')
     )
-    # Add borders for columns 1-5
-    for col in range(1, 6):
-        if col != 6:
-            ws.cell(mhl_vat_row, col).border = thin_border
 
     # Total with VAT row (reward + VAT) - label in column 6 (right-aligned before amount)
     mhl_total_vat_row = mhl_vat_row + 1
@@ -836,10 +828,6 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
         left=Side(style='thin'), right=Side(style='thin'),
         top=Side(style='thin'), bottom=Side(style='double')
     )
-    # Add borders for columns 1-5
-    for col in range(1, 6):
-        if col != 6:
-            ws.cell(mhl_total_vat_row, col).border = thin_border
 
     # ============================================================
     # REQUISITES / SIGNATURE SECTION below MHL
