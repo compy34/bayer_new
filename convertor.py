@@ -727,9 +727,12 @@ def get_mhl_availability_sum(mhl_df, template_brands):
 # ============================================================
 
 def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_ukrainian, executor_name, contract_no, contract_date,
-                         service1_total, service2_total, is_lic=True, mhl_df=None, df_req=None, selected_pharmacy=None):
+                         service1_total, service2_raw, service2_reward, is_lic=True, mhl_df=None, df_req=None, selected_pharmacy=None):
     """Fill звіт викладка+MHL sheet matching template structure exactly.
     Includes MHL data section at the bottom.
+
+    service2_raw: total purchased goods where penetration >= target (for "Всього без ПДВ")
+    service2_reward: reward amount = service2_raw * MHL_REWARD_MULTIPLIER (for "Винагорода")
     """
     # Handle None or empty pivot_df - create sheet with headers only
     if pivot_df is None or pivot_df.empty:
@@ -1052,7 +1055,8 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
         ws.cell(mhl_total_row, col, '').font = header_font
         ws.cell(mhl_total_row, col).border = thin_border
 
-    total_cell = ws.cell(mhl_total_row, 6, round(service2_total, 2))
+    # "Всього без ПДВ" row - use raw total purchased goods
+    total_cell = ws.cell(mhl_total_row, 6, round(service2_raw, 2))
     total_cell.font = header_font
     total_cell.alignment = right
     total_cell.number_format = '#,##0.00'
@@ -1061,7 +1065,7 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
         top=Side(style='thin'), bottom=Side(style='double')
     )
 
-    # Reward row (10% of total purchased)
+    # Reward row
     mhl_reward_row = mhl_total_row + 1
     # Hardcoded date as requested
     reward_text = (
@@ -1079,7 +1083,8 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
     for col in range(2, 6):
         ws.cell(mhl_reward_row, col).border = thin_border
 
-    reward_amount = round(service2_total * MHL_REWARD_MULTIPLIER, 2)
+    # Reward amount - use pre-calculated reward
+    reward_amount = round(service2_reward, 2)
     reward_cell = ws.cell(mhl_reward_row, 6, reward_amount)
     reward_cell.font = header_font
     reward_cell.alignment = right
@@ -1798,8 +1803,14 @@ def generate_excel_report(
         service1_dd = pivot_dd['Загальна сума'].sum()
 
     # Calculate Service 2 totals (availability / наявність) from MHL data
-    service2_lik = get_mhl_availability_sum(mhl_df, LIK_BRANDS_TEMPLATE)
-    service2_dd = get_mhl_availability_sum(mhl_df, DD_BRANDS_TEMPLATE)
+    # This is the total purchased goods where penetration >= target
+    service2_lik_raw = get_mhl_availability_sum(mhl_df, LIK_BRANDS_TEMPLATE)
+    service2_dd_raw = get_mhl_availability_sum(mhl_df, DD_BRANDS_TEMPLATE)
+
+    # Calculate reward amounts (what goes into ACT sheets)
+    # Reward = service2_total * MHL_REWARD_MULTIPLIER (e.g., 10%)
+    service2_lik = round(service2_lik_raw * MHL_REWARD_MULTIPLIER, 2)
+    service2_dd = round(service2_dd_raw * MHL_REWARD_MULTIPLIER, 2)
 
     # Period formatting
     period_start = period_start or 'No date'
@@ -1913,7 +1924,7 @@ def generate_excel_report(
     fill_zvit_worksheet(ws_zvit_lik, pivot_lik, LIK_BRANDS_TEMPLATE, period_str,
                         period_end_ukrainian,
                         executor_lik, contract_no_lik, contract_date_lik,
-                        service1_lik, service2_lik, is_lic=True, mhl_df=mhl_df,
+                        service1_lik, service2_lik_raw, service2_lik, is_lic=True, mhl_df=mhl_df,
                         df_req=df_req_lik, selected_pharmacy=selected_pharmacy)
 
     # ============================================================
@@ -1923,7 +1934,7 @@ def generate_excel_report(
     fill_zvit_worksheet(ws_zvit_dd, pivot_dd, DD_BRANDS_TEMPLATE, period_str,
                         period_end_ukrainian,
                         executor_dd, contract_no_dd, contract_date_dd,
-                        service1_dd, service2_dd, is_lic=False, mhl_df=mhl_df,
+                        service1_dd, service2_dd_raw, service2_dd, is_lic=False, mhl_df=mhl_df,
                         df_req=df_req_dd, selected_pharmacy=selected_pharmacy)
 
     # ============================================================
