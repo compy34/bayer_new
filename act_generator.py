@@ -494,13 +494,19 @@ def generate_tma_act_sheet(
     ws['A8'].alignment = Alignment(wrap_text=True, vertical='top', horizontal='left')
     ws.row_dimensions[8].height = 80
 
-    # ===== Row 9: "2. Маркетингові послуги були надані у період {період}" =====
-    ws.merge_cells('A9:E9')
-    ws['A9'] = f'2. Маркетингові послуги були надані у період {period_display}'
-    ws['A9'].font = normal_font
-    ws['A9'].alignment = left_alignment
+    # ===== Row 9: Empty spacing row =====
+    ws.row_dimensions[9].height = 15
 
-    # ===== Rows 10-12: Amounts in words =====
+    # ===== Row 10: "2. Маркетингові послуги були надані у період {період}" =====
+    ws.merge_cells('A10:E10')
+    ws['A10'] = f'2. Маркетингові послуги були надані у період {period_display}'
+    ws['A10'].font = normal_font
+    ws['A10'].alignment = left_alignment
+
+    # ===== Row 11: Empty spacing row =====
+    ws.row_dimensions[11].height = 15
+
+    # ===== Rows 12-14: Amounts in words =====
     from num2words import num2words
 
     def format_in_words(amount):
@@ -514,48 +520,51 @@ def generate_tma_act_sheet(
     vat_amount = total_no_vat * 0.2
     total_with_vat = total_no_vat + vat_amount
 
-    # Row 10: "3. Вартість наданих послуг без ПДВ складає" + amount in words
-    ws.merge_cells('A10:E10')
-    ws['A10'] = f'3. Вартість наданих послуг без ПДВ складає — {format_in_words(total_no_vat)}'
-    ws['A10'].font = bold_normal_font
-    ws['A10'].alignment = left_alignment
-
-    # Row 11: "Вартість наданих послуг з ПДВ складає" + amount in words
-    ws.merge_cells('A11:E11')
-    ws['A11'] = f'Вартість наданих послуг з ПДВ складає — {format_in_words(total_with_vat)}'
-    ws['A11'].font = bold_normal_font
-    ws['A11'].alignment = left_alignment
-
-    # Row 12: "ПДВ 20%" + amount in words
+    # Row 12: "3. Вартість наданих послуг без ПДВ складає" + amount in words
     ws.merge_cells('A12:E12')
-    ws['A12'] = f'ПДВ 20% — {format_in_words(vat_amount)}'
+    ws['A12'] = f'3. Вартість наданих послуг без ПДВ складає — {format_in_words(total_no_vat)}'
     ws['A12'].font = bold_normal_font
     ws['A12'].alignment = left_alignment
 
-    # ===== Row 13: Clause 4 =====
+    # Row 13: "Вартість наданих послуг з ПДВ складає" + amount in words
     ws.merge_cells('A13:E13')
-    ws['A13'] = '4. Усі терміни вживаються в цьому Акті в тому ж значенні, у якому вони вживаються в Договорі.'
-    ws['A13'].font = normal_font
+    ws['A13'] = f'Вартість наданих послуг з ПДВ складає — {format_in_words(total_with_vat)}'
+    ws['A13'].font = bold_normal_font
     ws['A13'].alignment = left_alignment
 
-    # ===== Row 14: Clause 5 =====
+    # Row 14: "ПДВ 20%" + amount in words
     ws.merge_cells('A14:E14')
-    ws['A14'] = '5. Цей Акт складений у двох ідентичних примірниках, по одному для кожної Сторони.'
-    ws['A14'].font = normal_font
+    ws['A14'] = f'ПДВ 20% — {format_in_words(vat_amount)}'
+    ws['A14'].font = bold_normal_font
     ws['A14'].alignment = left_alignment
 
-    # ===== Row 15: Clause 6 =====
-    ws.merge_cells('A15:E15')
-    ws['A15'] = (
+    # ===== Row 15: Empty spacing row =====
+    ws.row_dimensions[15].height = 15
+
+    # ===== Row 16: Clause 4 =====
+    ws.merge_cells('A16:E16')
+    ws['A16'] = '4. Усі терміни вживаються в цьому Акті в тому ж значенні, у якому вони вживаються в Договорі.'
+    ws['A16'].font = normal_font
+    ws['A16'].alignment = left_alignment
+
+    # ===== Row 17: Clause 5 =====
+    ws.merge_cells('A17:E17')
+    ws['A17'] = '5. Цей Акт складений у двох ідентичних примірниках, по одному для кожної Сторони.'
+    ws['A17'].font = normal_font
+    ws['A17'].alignment = left_alignment
+
+    # ===== Row 18: Clause 6 =====
+    ws.merge_cells('A18:E18')
+    ws['A18'] = (
         '6. Замовник підтверджує, що послуги, зазначені у цьому Акті, були надані Виконавцем в повному обсязі, '
         'зауваження щодо якості та своєчасності надання послуг на момент підписання Акту відсутні.'
     )
-    ws['A15'].font = normal_font
-    ws['A15'].alignment = Alignment(wrap_text=True, vertical='top', horizontal='left')
-    ws.row_dimensions[15].height = 40
+    ws['A18'].font = normal_font
+    ws['A18'].alignment = Alignment(wrap_text=True, vertical='top', horizontal='left')
+    ws.row_dimensions[18].height = 40
 
     # ===== Requisites section (same as other acts) =====
-    row_idx = 17
+    row_idx = 20
     ws.cell(row=row_idx, column=1, value='ВИКОНАВЕЦЬ:').font = Font(bold=True, size=11)
     ws.cell(row=row_idx, column=4, value='ЗАМОВНИК:').font = Font(bold=True, size=11)
     row_idx += 1
