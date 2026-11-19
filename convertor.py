@@ -597,10 +597,62 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
         top=Side(style='thin'), bottom=Side(style='double')
     )
 
+    # --- VAT breakdown for Service 1 (similar to TMA sheets) ---
+    # "Всього без ПДВ" row
+    subtotal_row = total_row + 1
+    ws.cell(subtotal_row, total_col - 1, 'Всього без ПДВ').font = header_font
+    ws.cell(subtotal_row, total_col - 1).alignment = right
+    ws.cell(subtotal_row, total_col - 1).border = thin_border
+    subtotal_cell = ws.cell(subtotal_row, total_col, round(service1_total, 2))
+    subtotal_cell.font = header_font
+    subtotal_cell.alignment = right
+    subtotal_cell.number_format = '#,##0.00'
+    subtotal_cell.border = Border(
+        left=Side(style='thin'), right=Side(style='thin'),
+        top=Side(style='thin'), bottom=Side(style='double')
+    )
+    # Add empty borders for columns 1 to total_col-2
+    for col in range(1, total_col - 1):
+        ws.cell(subtotal_row, col).border = thin_border
+
+    # VAT row (20%)
+    vat_row = subtotal_row + 1
+    ws.cell(vat_row, total_col - 1, 'ПДВ 20%').font = header_font
+    ws.cell(vat_row, total_col - 1).alignment = right
+    ws.cell(vat_row, total_col - 1).border = thin_border
+    vat_amount = round(service1_total * 0.2, 2)
+    vat_cell = ws.cell(vat_row, total_col, vat_amount)
+    vat_cell.font = header_font
+    vat_cell.alignment = right
+    vat_cell.number_format = '#,##0.00'
+    vat_cell.border = Border(
+        left=Side(style='thin'), right=Side(style='thin'),
+        top=Side(style='thin'), bottom=Side(style='double')
+    )
+    for col in range(1, total_col - 1):
+        ws.cell(vat_row, col).border = thin_border
+
+    # Total with VAT row
+    total_vat_row = vat_row + 1
+    ws.cell(total_vat_row, total_col - 1, 'Разом з ПДВ').font = header_font
+    ws.cell(total_vat_row, total_col - 1).alignment = right
+    ws.cell(total_vat_row, total_col - 1).border = thin_border
+    total_vat_amount = round(service1_total + vat_amount, 2)
+    total_vat_cell = ws.cell(total_vat_row, total_col, total_vat_amount)
+    total_vat_cell.font = header_font
+    total_vat_cell.alignment = right
+    total_vat_cell.number_format = '#,##0.00'
+    total_vat_cell.border = Border(
+        left=Side(style='thin'), right=Side(style='thin'),
+        top=Side(style='thin'), bottom=Side(style='double')
+    )
+    for col in range(1, total_col - 1):
+        ws.cell(total_vat_row, col).border = thin_border
+
     # ============================================================
     # MHL SECTION (Service 2 - Availability) at the bottom
     # ============================================================
-    mhl_start_row = total_row + 2
+    mhl_start_row = total_vat_row + 2
 
     # MHL section title
     ws.merge_cells(start_row=mhl_start_row, start_column=1, end_row=mhl_start_row, end_column=end_col)
