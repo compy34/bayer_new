@@ -306,6 +306,96 @@ _init_legacy_sku_lists()
 
 
 # ============================================================
+# PENETRATION TARGET CONFIG (local overrides)
+# ============================================================
+# Allows overriding database PENETRATION_TARGET values per SKU_UA
+
+PENETRATION_TARGET_FILE = Path(__file__).resolve().parent / 'penetration_targets.json'
+_penetration_target_cache = None
+_penetration_target_lock = threading.Lock()
+
+
+def load_penetration_targets():
+    """Load penetration targets from JSON file."""
+    global _penetration_target_cache
+
+    if _penetration_target_cache is not None:
+        return _penetration_target_cache
+
+    import json
+
+    if not PENETRATION_TARGET_FILE.exists():
+        _penetration_target_cache = {}
+        return _penetration_target_cache
+
+    try:
+        with open(PENETRATION_TARGET_FILE, 'r', encoding='utf-8') as f:
+            _penetration_target_cache = json.load(f)
+        # Normalize keys to lowercase for case-insensitive matching
+        _penetration_target_cache = {
+            str(k).strip().casefold(): float(v) for k, v in _penetration_target_cache.items()
+        }
+        return _penetration_target_cache
+    except Exception as e:
+        print(f"Error loading penetration targets: {e}")
+        _penetration_target_cache = {}
+        return _penetration_target_cache
+
+
+def _save_penetration_targets(targets):
+    """Thread-safe save of penetration targets to JSON."""
+    with _penetration_target_lock:
+        import json
+        try:
+            with open(PENETRATION_TARGET_FILE, 'w', encoding='utf-8') as f:
+                json.dump(targets, f, ensure_ascii=False, indent=2)
+            return True
+        except Exception as e:
+            print(f"Error saving penetration targets: {e}")
+            return False
+
+
+def get_penetration_target(sku_ua):
+    """Get local penetration target override for a SKU.
+    Returns None if no override exists (use database value).
+    """
+    load_penetration_targets()
+    if _penetration_target_cache is None:
+        return None
+    normalized = str(sku_ua).strip().casefold()
+    return _penetration_target_cache.get(normalized)
+
+
+def set_penetration_target(sku_ua, target):
+    """Set local penetration target override for a SKU.
+    target: float value (e.g., 0.8 for 80%) or None to remove override
+    """
+    load_penetration_targets()
+    normalized = str(sku_ua).strip().casefold()
+
+    if target is None:
+        # Remove override
+        if normalized in _penetration_target_cache:
+            del _penetration_target_cache[normalized]
+    else:
+        # Set override
+        _penetration_target_cache[normalized] = float(target)
+
+    return _save_penetration_targets(_penetration_target_cache)
+
+
+def get_all_penetration_targets():
+    """Get all local penetration target overrides for management dialog."""
+    load_penetration_targets()
+    if not _penetration_target_cache:
+        return pd.DataFrame(columns=['SKU_UA', 'TARGET'])
+    df = pd.DataFrame([
+        {'SKU_UA': k, 'TARGET': v} for k, v in _penetration_target_cache.items()
+    ])
+    return df.sort_values('SKU_UA')
+
+
+# ============================================================
 # HELPER FUNCTIONS
 # ============================================================
 
@@ -361,6 +451,7 @@ def build_pivot_for_report(df, template_brands):
 def get_mhl_availability_sum(mhl_df, template_brands):
     """Calculate MHL availability service sum (Service 2) from MHL data.
     This corresponds to the 'наявність' service - sum of purchased goods where penetration >= target.
+    Local penetration target overrides are applied from penetration_targets.json.
     """
     if mhl_df is None or mhl_df.empty:
         return 0.0
@@ -382,14 +473,25 @@ def get_mhl_availability_sum(mhl_df, template_brands):
     for column in ['PENETRATION', 'PRICE_CP', 'SUPPLY', 'PENETRATION_TARGET']:
         work_df[column] = pd.to_numeric(work_df[column], errors='coerce')
 
+    # Apply local penetration target overrides
+    local_targets = load_penetration_targets()
+    if local_targets:
+        # Create a mapping from normalized SKU_UA to local target
+        work_df['sku_normalized'] = work_df[sku_col].fillna('').astype(str).str.strip().str.casefold()
+        work_df['local_target'] = work_df['sku_normalized'].map(local_targets)
+        # Use local target where available, otherwise fall back to database PENETRATION_TARGET
+        work_df['effective_target'] = work_df['local_target'].combine_first(work_df['PENETRATION_TARGET'])
+    else:
+        work_df['effective_target'] = work_df['PENETRATION_TARGET']
+
     # Calculate sum of purchased goods
     work_df['Сума закупленого'] = work_df['SUPPLY'] * work_df['PRICE_CP']
 
-    # Eligible: PENETRATION >= PENETRATION_TARGET
-    # If PENETRATION is NULL -> treat as 0 (not eligible unless target is also 0/NULL)
-    # If PENETRATION_TARGET is NULL -> treat as 0 (eligible if penetration >= 0)
+    # Eligible: PENETRATION >= effective_target
+    # If PENETRATION is NULL -> treat as 0
+    # If effective_target is NULL -> treat as 0
     penetration = work_df['PENETRATION'].fillna(0)
-    target = work_df['PENETRATION_TARGET'].fillna(0)
+    target = work_df['effective_target'].fillna(0)
     work_df['eligible'] = penetration >= target
 
     total = work_df.loc[work_df['eligible'], 'Сума закупленого'].sum()

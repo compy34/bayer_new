@@ -28,6 +28,8 @@ from convertor import (
     set_sku_active,
     get_tma_auth_amount,
     set_tma_auth_amount,
+    get_all_penetration_targets,
+    set_penetration_target,
 )
 from Data.Controller import get_mhl_data, get_pharmacy_data, load_requisites_file, get_tma_offtake_data, DataLoadError
 
@@ -168,6 +170,11 @@ class SettingsDialog(tk.Toplevel):
         prices_frame = tk.Frame(notebook, bg=BG_COLOR)
         notebook.add(prices_frame, text='  Ціни послуг  ')
         self._build_prices_tab(prices_frame)
+
+        # --- Tab 5: Penetration Targets ---
+        targets_frame = tk.Frame(notebook, bg=BG_COLOR)
+        notebook.add(targets_frame, text='  Цілі проникнення  ')
+        self._build_targets_tab(targets_frame)
 
         # Close button
         btn_frame = tk.Frame(self, bg=BG_COLOR)
@@ -542,6 +549,141 @@ class SettingsDialog(tk.Toplevel):
         btn_frame.pack(fill='x', padx=PAD_X, pady=(0, PAD_Y))
         ModernButton(btn_frame, text='Скасувати', style='secondary', command=dialog.destroy).pack(side='right', padx=(8, 0))
         ModernButton(btn_frame, text='Зберегти', style='success', command=save).pack(side='right')
+
+    def _build_targets_tab(self, parent):
+        """Penetration target management."""
+        tk.Label(
+            parent,
+            text='Локальні цілі проникнення (відсоток) для перевизначення значень з бази даних.\nФормат: SKU/Назва товару → ціль (напр. 0.8 для 80%).',
+            font=FONT_SMALL, bg=BG_COLOR, fg=TEXT_MUTED, wraplength=600, justify='left'
+        ).pack(anchor='w', pady=(0, PAD_Y))
+
+        # Toolbar
+        toolbar = tk.Frame(parent, bg=BG_COLOR)
+        toolbar.pack(fill='x', pady=(0, 8))
+
+        ModernButton(toolbar, text='➕ Додати ціль', style='primary', command=self._add_target).pack(side='left', padx=(0, 8))
+        ModernButton(toolbar, text='🔄 Оновити', style='secondary', command=self._refresh_targets_table).pack(side='left')
+
+        # Table
+        table_frame = tk.Frame(parent, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
+        table_frame.pack(fill='both', expand=True)
+
+        columns = ('SKU_UA', 'TARGET')
+        self.targets_tree = ttk.Treeview(table_frame, columns=columns, show='headings', selectmode='extended')
+
+        col_config = {
+            'SKU_UA': ('SKU / Назва товару', 350),
+            'TARGET': ('Ціль (0-1)', 100),
+        }
+        for col, (title, width) in col_config.items():
+            self.targets_tree.heading(col, text=title)
+            self.targets_tree.column(col, width=width, anchor='w' if col != 'TARGET' else 'center')
+
+        vsb = ttk.Scrollbar(table_frame, orient='vertical', command=self.targets_tree.yview)
+        hsb = ttk.Scrollbar(table_frame, orient='horizontal', command=self.targets_tree.xview)
+        self.targets_tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+
+        self.targets_tree.grid(row=0, column=0, sticky='nsew')
+        vsb.grid(row=0, column=1, sticky='ns')
+        hsb.grid(row=1, column=0, sticky='ew')
+        table_frame.grid_rowconfigure(0, weight=1)
+        table_frame.grid_columnconfigure(0, weight=1)
+
+        self.targets_tree.bind('<Double-1>', self._on_target_double_click)
+        self.targets_tree.bind('<Delete>', lambda e: self._delete_selected_targets())
+
+        self._refresh_targets_table()
+
+    def _refresh_targets_table(self):
+        for item in self.targets_tree.get_children():
+            self.targets_tree.delete(item)
+        df = get_all_penetration_targets()
+        for _, row in df.iterrows():
+            self.targets_tree.insert('', 'end', values=(row['SKU_UA'], f'{row["TARGET"]:.2f}'))
+
+    def _on_target_double_click(self, event):
+        item = self.targets_tree.selection()[0] if self.targets_tree.selection() else None
+        if not item:
+            return
+        values = self.targets_tree.item(item, 'values')
+        self._edit_target_dialog(values)
+
+    def _add_target(self):
+        self._edit_target_dialog()
+
+    def _edit_target_dialog(self, values=None):
+        """Dialog to add/edit penetration target."""
+        dialog = tk.Toplevel(self)
+        dialog.title('Редагувати ціль проникнення' if values else 'Додати ціль проникнення')
+        dialog.geometry('420x200')
+        dialog.configure(bg=BG_COLOR)
+        dialog.transient(self)
+        dialog.grab_set()
+
+        dialog.update_idletasks()
+        x = self.winfo_rootx() + (self.winfo_width() - dialog.winfo_width()) // 2
+        y = self.winfo_rooty() + (self.winfo_height() - dialog.winfo_height()) // 2
+        dialog.geometry(f'+{x}+{y}')
+
+        fields = {}
+        labels = [
+            ('SKU_UA', 'SKU / Назва товару (обов\'язково)'),
+            ('TARGET', 'Ціль проникнення (0-1, напр. 0.8 для 80%)'),
+        ]
+        for i, (key, label) in enumerate(labels):
+            tk.Label(dialog, text=label, font=FONT_BODY, bg=BG_COLOR, fg=TEXT_MAIN).grid(
+                row=i, column=0, sticky='w', padx=PAD_X, pady=(PAD_Y, 4)
+            )
+            entry = tk.Entry(dialog, font=FONT_BODY, relief='solid', bd=1,
+                            highlightthickness=1, highlightcolor=BORDER_FOCUS, highlightbackground=BORDER)
+            entry.grid(row=i, column=0, sticky='ew', padx=PAD_X, pady=(0, 4))
+            fields[key] = entry
+
+        dialog.grid_columnconfigure(0, weight=1)
+
+        # Pre-fill if editing
+        if values:
+            fields['SKU_UA'].insert(0, values[0])
+            fields['SKU_UA'].config(state='readonly')
+            fields['TARGET'].insert(0, values[1])
+
+        def save():
+            sku = fields['SKU_UA'].get().strip()
+            target_str = fields['TARGET'].get().strip()
+
+            if not sku:
+                messagebox.showwarning('Помилка', 'SKU не може бути порожнім', parent=dialog)
+                return
+
+            try:
+                target = float(target_str)
+                if not 0 <= target <= 1:
+                    raise ValueError
+            except ValueError:
+                messagebox.showwarning('Помилка', 'Ціль має бути числом від 0 до 1 (напр. 0.8)', parent=dialog)
+                return
+
+            set_penetration_target(sku, target)
+            self._refresh_targets_table()
+            dialog.destroy()
+            self.app.status_var.set(f'Ціль проникнення оновлена: {sku} = {target:.2f}')
+
+        btn_frame = tk.Frame(dialog, bg=BG_COLOR)
+        btn_frame.grid(row=2, column=0, sticky='ew', padx=PAD_X, pady=PAD_Y)
+        ModernButton(btn_frame, text='Скасувати', style='secondary', command=dialog.destroy).pack(side='right', padx=(8, 0))
+        ModernButton(btn_frame, text='Зберегти', style='success', command=save).pack(side='right')
+
+    def _delete_selected_targets(self):
+        selected = self.targets_tree.selection()
+        if not selected:
+            return
+        if messagebox.askyesno('Підтвердження', f'Видалити {len(selected)} цілі?', parent=self):
+            for item in selected:
+                values = self.targets_tree.item(item, 'values')
+                sku = values[0]
+                set_penetration_target(sku, None)  # None = remove override
+            self._refresh_targets_table()
 
 
 class ReportApp:
