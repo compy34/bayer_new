@@ -486,10 +486,9 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
     ws.row_dimensions[7].height = 60
 
     # --- Row 9: Table headers ---
-    # Only 4 headers now: № п/п, Pharmacy name, Responsible person, Brand section header
-    # The "Сума до виплати, без ПДВ" is only in row 10 (total column)
-    headers = ['№ п/п', 'Назва та адреса Аптеки/Аптечного пункту, де були надані маркетингові послуги',
-               'Відповідальна особа']
+    # Only 3 headers now: № п/п, Pharmacy name, Brand section header
+    # "Відповідальна особа" column is hidden
+    headers = ['№ п/п', 'Назва та адреса Аптеки/Аптечного пункту, де були надані маркетингові послуги']
 
     for col_idx, header in enumerate(headers, 1):
         cell = ws.cell(9, col_idx, header)
@@ -526,10 +525,12 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
     # --- Data rows ---
     start_data_row = 11
 
+    # Hide "Відповідальна особа" column (column 3)
+    ws.column_dimensions['C'].width = 0
+
     for idx, row_data in enumerate(pivot_df.iterrows(), start=start_data_row):
         row_values = row_data[1]
         pharmacy_name = row_values['PHARMACY_NAME']
-        responsible = ''  # Could be extracted from data if available
 
         # № п/п
         cell = ws.cell(idx, 1, idx - start_data_row + 1)
@@ -543,11 +544,7 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
         cell.alignment = left
         cell.border = thin_border
 
-        # Responsible person
-        cell = ws.cell(idx, 3, responsible)
-        cell.font = normal_font
-        cell.alignment = left
-        cell.border = thin_border
+        # Skip "Відповідальна особа" column (column 3 - hidden)
 
         # Brand quantities
         row_total = 0
@@ -634,7 +631,8 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
 
     # MHL headers
     mhl_header_row = mhl_start_row + 1
-    mhl_headers = ['№ п/п', 'Назва товару', 'Бренд',
+    # Hide "Бренд" column (column 3)
+    mhl_headers = ['№ п/п', 'Назва товару',
                    'Відсоток аптек мережі, які мають товар',
                    'Розрахункова ціна за одиницю товару, грн',
                    'Кількість упаковок товару, закуплена аптечною мережею',
@@ -701,6 +699,10 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
 
     # Write MHL data rows
     mhl_first_data_row = mhl_header_row + 1
+
+    # Hide "Бренд" column (column 3) - set width to 0
+    ws.column_dimensions['C'].width = 0
+
     for idx, mhl_row in enumerate(mhl_data_rows, start=mhl_first_data_row):
         ws.cell(idx, 1, idx - mhl_first_data_row + 1).font = normal_font
         ws.cell(idx, 1).alignment = center
@@ -710,29 +712,27 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
         ws.cell(idx, 2).alignment = left
         ws.cell(idx, 2).border = thin_border
 
-        ws.cell(idx, 3, mhl_row['Бренд']).font = normal_font
-        ws.cell(idx, 3).alignment = left
+        # Skip "Бренд" column (column 3 - hidden)
+
+        # PENETRATION as integer percentage with % sign (now column 3)
+        penetration_pct = int(round(mhl_row['PENETRATION'] * 100))
+        ws.cell(idx, 3, f'{penetration_pct}%').font = normal_font
+        ws.cell(idx, 3).alignment = center
         ws.cell(idx, 3).border = thin_border
 
-        # PENETRATION as integer percentage with % sign
-        penetration_pct = int(round(mhl_row['PENETRATION'] * 100))
-        ws.cell(idx, 4, f'{penetration_pct}%').font = normal_font
-        ws.cell(idx, 4).alignment = center
+        ws.cell(idx, 4, round(mhl_row['PRICE_CP'], 2)).font = normal_font
+        ws.cell(idx, 4).alignment = right
         ws.cell(idx, 4).border = thin_border
+        ws.cell(idx, 4).number_format = '#,##0.00'
 
-        ws.cell(idx, 5, round(mhl_row['PRICE_CP'], 2)).font = normal_font
-        ws.cell(idx, 5).alignment = right
+        ws.cell(idx, 5, int(mhl_row['SUPPLY'])).font = normal_font
+        ws.cell(idx, 5).alignment = center
         ws.cell(idx, 5).border = thin_border
-        ws.cell(idx, 5).number_format = '#,##0.00'
 
-        ws.cell(idx, 6, int(mhl_row['SUPPLY'])).font = normal_font
-        ws.cell(idx, 6).alignment = center
+        ws.cell(idx, 6, round(mhl_row['Сума закупленого'], 2)).font = normal_font
+        ws.cell(idx, 6).alignment = right
         ws.cell(idx, 6).border = thin_border
-
-        ws.cell(idx, 7, round(mhl_row['Сума закупленого'], 2)).font = normal_font
-        ws.cell(idx, 7).alignment = right
-        ws.cell(idx, 7).border = thin_border
-        ws.cell(idx, 7).number_format = '#,##0.00'
+        ws.cell(idx, 6).number_format = '#,##0.00'
 
     mhl_last_data_row = max(mhl_first_data_row, mhl_first_data_row + len(mhl_data_rows) - 1)
 
@@ -744,11 +744,11 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
     ws.cell(mhl_total_row, 2).alignment = right
     ws.cell(mhl_total_row, 2).border = thin_border
 
-    for col in range(3, 7):
+    for col in range(3, 6):
         ws.cell(mhl_total_row, col, '').font = header_font
         ws.cell(mhl_total_row, col).border = thin_border
 
-    total_cell = ws.cell(mhl_total_row, 7, round(service2_total, 2))
+    total_cell = ws.cell(mhl_total_row, 6, round(service2_total, 2))
     total_cell.font = header_font
     total_cell.alignment = right
     total_cell.number_format = '#,##0.00'
@@ -766,17 +766,17 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
         f'згідно пункту 2.2.2 Договору про маркетингові послуги №{contract_no} '
         f'від 27 лютого 2026 року'
     )
-    ws.merge_cells(start_row=mhl_reward_row, start_column=1, end_row=mhl_reward_row, end_column=6)
+    ws.merge_cells(start_row=mhl_reward_row, start_column=1, end_row=mhl_reward_row, end_column=5)
     cell = ws.cell(mhl_reward_row, 1, reward_text)
     cell.font = header_font
     cell.alignment = left
     cell.border = thin_border
     # Apply border to all cells in merged range (only first cell gets value)
-    for col in range(2, 7):
+    for col in range(2, 6):
         ws.cell(mhl_reward_row, col).border = thin_border
 
     reward_amount = round(service2_total * 0.1, 2)
-    reward_cell = ws.cell(mhl_reward_row, 7, reward_amount)
+    reward_cell = ws.cell(mhl_reward_row, 6, reward_amount)
     reward_cell.font = header_font
     reward_cell.alignment = right
     reward_cell.number_format = '#,##0.00'
@@ -787,10 +787,10 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
 
     # "Всього без ПДВ" row - same value as reward
     mhl_subtotal_row = mhl_reward_row + 1
-    ws.cell(mhl_subtotal_row, 6, 'Всього без ПДВ').font = header_font
-    ws.cell(mhl_subtotal_row, 6).alignment = right
-    ws.cell(mhl_subtotal_row, 6).border = thin_border
-    subtotal_cell = ws.cell(mhl_subtotal_row, 7, reward_amount)
+    ws.cell(mhl_subtotal_row, 5, 'Всього без ПДВ').font = header_font
+    ws.cell(mhl_subtotal_row, 5).alignment = right
+    ws.cell(mhl_subtotal_row, 5).border = thin_border
+    subtotal_cell = ws.cell(mhl_subtotal_row, 6, reward_amount)
     subtotal_cell.font = header_font
     subtotal_cell.alignment = right
     subtotal_cell.number_format = '#,##0.00'
@@ -799,13 +799,13 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
         top=Side(style='thin'), bottom=Side(style='double')
     )
 
-    # VAT row (20% of reward) - label in column 6 (right-aligned before amount)
+    # VAT row (20% of reward) - label in column 5 (right-aligned before amount)
     mhl_vat_row = mhl_subtotal_row + 1
-    ws.cell(mhl_vat_row, 6, 'ПДВ 20%').font = header_font
-    ws.cell(mhl_vat_row, 6).alignment = right
-    ws.cell(mhl_vat_row, 6).border = thin_border
+    ws.cell(mhl_vat_row, 5, 'ПДВ 20%').font = header_font
+    ws.cell(mhl_vat_row, 5).alignment = right
+    ws.cell(mhl_vat_row, 5).border = thin_border
     vat_amount = round(reward_amount * 0.2, 2)
-    vat_cell = ws.cell(mhl_vat_row, 7, vat_amount)
+    vat_cell = ws.cell(mhl_vat_row, 6, vat_amount)
     vat_cell.font = header_font
     vat_cell.alignment = right
     vat_cell.number_format = '#,##0.00'
@@ -814,13 +814,13 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
         top=Side(style='thin'), bottom=Side(style='double')
     )
 
-    # Total with VAT row (reward + VAT) - label in column 6 (right-aligned before amount)
+    # Total with VAT row (reward + VAT) - label in column 5 (right-aligned before amount)
     mhl_total_vat_row = mhl_vat_row + 1
-    ws.cell(mhl_total_vat_row, 6, 'Всього з ПДВ').font = header_font
-    ws.cell(mhl_total_vat_row, 6).alignment = right
-    ws.cell(mhl_total_vat_row, 6).border = thin_border
+    ws.cell(mhl_total_vat_row, 5, 'Всього з ПДВ').font = header_font
+    ws.cell(mhl_total_vat_row, 5).alignment = right
+    ws.cell(mhl_total_vat_row, 5).border = thin_border
     total_vat_amount = round(reward_amount + vat_amount, 2)
-    total_vat_cell = ws.cell(mhl_total_vat_row, 7, total_vat_amount)
+    total_vat_cell = ws.cell(mhl_total_vat_row, 6, total_vat_amount)
     total_vat_cell.font = header_font
     total_vat_cell.alignment = right
     total_vat_cell.number_format = '#,##0.00'

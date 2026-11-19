@@ -413,8 +413,8 @@ def generate_tma_act_sheet(
                 line.strip() for line in raw_req_text.split('\n') if line.strip()
             ]
 
-    # Network name for "між ТОВ «БАЙЄР» та {мережа}"
-    network_name = selected_pharmacy if selected_pharmacy and selected_pharmacy != 'Усі аптеки' else executor_name
+    # Network name for "між ТОВ «БАЙЄР» та {мережа}" - use customer_name from requisites (Клиент из базы данных)
+    network_name = customer_name if customer_name != 'ТОВ «БАЙЄР»' else (selected_pharmacy if selected_pharmacy and selected_pharmacy != 'Усі аптеки' else executor_name)
 
     # Period formatting (same as other sheets)
     month_names = [
