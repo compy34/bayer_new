@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import pandas as pd
 from num2words import num2words
 from openpyxl.styles import Alignment, Border, Font, Side
 
@@ -45,11 +46,14 @@ def generate_act_sheet(
 
     customer_name = 'ТОВ «БАЙЕР»'
 
+    # Column name variants for client (user may have "Клиент из базы данных" or "Клиент с базы данных")
+    client_col_variants = ['Клиент из базы данных', 'Клиент с базы данных', 'Клиент из базы', 'Клиент с базы']
+
     if df_req is not None and not df_req.empty:
         matched_row = None
         clean_selected = str(selected_pharmacy).strip()
         target_col = None
-        for col_candidate in ['chain_name', 'Клиент из базы данных', 'Мережа', 'Назва']:
+        for col_candidate in ['chain_name'] + client_col_variants + ['Мережа', 'Назва']:
             if col_candidate in df_req.columns:
                 target_col = col_candidate
                 break
@@ -69,10 +73,12 @@ def generate_act_sheet(
         executor_name = str(
             matched_row.get('Виконавець', matched_row.get('Юридическое лицо', executor_name))
         )
-        # Замовник — з колонки "Клиент из базы данных" (якщо є), інакше дефолт
-        customer_name = str(
-            matched_row.get('Клиент из базы данных', customer_name)
-        )
+        # Замовник — пробуємо різні варіанти назв колонки
+        customer_name = customer_name  # default
+        for col in client_col_variants:
+            if col in matched_row and pd.notna(matched_row[col]) and str(matched_row[col]).strip():
+                customer_name = str(matched_row[col]).strip()
+                break
         contract_no = str(matched_row.get('№ договора', contract_no))
         contract_date = str(matched_row.get('Дата договора', contract_date))
 
@@ -341,12 +347,15 @@ def generate_tma_act_sheet(
 
     customer_name = 'ТОВ «БАЙЄР»'
 
+    # Column name variants for client (user may have "Клиент из базы данных" or "Клиент с базы данных")
+    client_col_variants = ['Клиент из базы данных', 'Клиент с базы данных', 'Клиент из базы', 'Клиент с базы']
+
     # Extract data from requisites
     if df_req is not None and not df_req.empty:
         matched_row = None
         clean_selected = str(selected_pharmacy).strip()
         target_col = None
-        for col_candidate in ['chain_name', 'Клиент из базы данных', 'Мережа', 'Назва']:
+        for col_candidate in ['chain_name'] + client_col_variants + ['Мережа', 'Назва']:
             if col_candidate in df_req.columns:
                 target_col = col_candidate
                 break
@@ -366,10 +375,11 @@ def generate_tma_act_sheet(
         executor_name = str(
             matched_row.get('Виконавець', matched_row.get('Юридическое лицо', executor_name))
         )
-        # Замовник — з колонки "Клиент из базы данных"
-        customer_name = str(
-            matched_row.get('Клиент из базы данных', customer_name)
-        )
+        # Замовник — пробуємо різні варіанти назв колонки
+        for col in client_col_variants:
+            if col in matched_row and pd.notna(matched_row[col]) and str(matched_row[col]).strip():
+                customer_name = str(matched_row[col]).strip()
+                break
         contract_no = str(matched_row.get('№ договора', contract_no))
         contract_date = str(matched_row.get('Дата договора', contract_date))
 
