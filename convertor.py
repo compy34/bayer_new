@@ -569,37 +569,10 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
         cell.border = thin_border
         cell.number_format = '#,##0.00'
 
-    # --- Total row (Service 1) ---
-    last_data_row = start_data_row + len(pivot_df) - 1
-    total_row = last_data_row + 1
-
-    ws.cell(total_row, 1, '').font = header_font
-    ws.cell(total_row, 1).border = thin_border
-    ws.cell(total_row, 2, 'ВСЬОГО:').font = header_font
-    ws.cell(total_row, 2).alignment = left
-    ws.cell(total_row, 2).border = thin_border
-    ws.cell(total_row, 3, '').font = header_font
-    ws.cell(total_row, 3).border = thin_border
-
-    for i in range(num_brands):
-        ws.cell(total_row, brand_start_col + i, '').font = header_font
-        ws.cell(total_row, brand_start_col + i).border = Border(
-            left=Side(style='thin'), right=Side(style='thin'),
-            top=Side(style='thin'), bottom=Side(style='double')
-        )
-
-    cell = ws.cell(total_row, total_col, round(service1_total, 2))
-    cell.font = header_font
-    cell.alignment = right
-    cell.number_format = '#,##0.00'
-    cell.border = Border(
-        left=Side(style='thin'), right=Side(style='thin'),
-        top=Side(style='thin'), bottom=Side(style='double')
-    )
-
     # --- VAT breakdown for Service 1 (similar to TMA sheets) ---
-    # "Всього без ПДВ" row
-    subtotal_row = total_row + 1
+    # "Всього без ПДВ" row (replaces the old "ВСЬОГО:" row)
+    last_data_row = start_data_row + len(pivot_df) - 1
+    subtotal_row = last_data_row + 1
     ws.cell(subtotal_row, total_col - 1, 'Всього без ПДВ').font = header_font
     ws.cell(subtotal_row, total_col - 1).alignment = right
     ws.cell(subtotal_row, total_col - 1).border = thin_border
