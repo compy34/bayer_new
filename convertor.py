@@ -586,9 +586,6 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
             left=Side(style='thin'), right=Side(style='thin'),
             top=Side(style='thin'), bottom=Side(style='double')
         )
-        # Add empty borders for columns 1 to total_col-2
-        for col in range(1, total_col - 1):
-            ws.cell(subtotal_row, col).border = thin_border
 
         # VAT row (20%)
         vat_row = subtotal_row + 1
@@ -604,8 +601,6 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
             left=Side(style='thin'), right=Side(style='thin'),
             top=Side(style='thin'), bottom=Side(style='double')
         )
-        for col in range(1, total_col - 1):
-            ws.cell(vat_row, col).border = thin_border
 
         # Total with VAT row
         total_vat_row = vat_row + 1
@@ -621,8 +616,6 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
             left=Side(style='thin'), right=Side(style='thin'),
             top=Side(style='thin'), bottom=Side(style='double')
         )
-        for col in range(1, total_col - 1):
-            ws.cell(total_vat_row, col).border = thin_border
 
         # ============================================================
         # MHL SECTION (Service 2 - Availability) at the bottom
