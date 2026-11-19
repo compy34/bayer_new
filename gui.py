@@ -753,12 +753,12 @@ class SettingsDialog(tk.Toplevel):
 
         # TMA Preview area
         tma_preview_frame = tk.Frame(parent, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
-        tma_preview_frame.pack(fill='both', expand=True)
+        tma_preview_frame.pack(fill='x', pady=(0, PAD_Y))
         tma_preview_frame.grid_rowconfigure(0, weight=1)
         tma_preview_frame.grid_columnconfigure(0, weight=1)
 
         self.tma_action_preview = tk.Text(tma_preview_frame, font=FONT_MONO, bg=SURFACE, fg=TEXT_MAIN,
-                                           wrap='none', height=10, relief='flat', bd=0)
+                                           wrap='none', height=8, relief='flat', bd=0)
         self.tma_action_preview.grid(row=0, column=0, sticky='nsew', padx=8, pady=8)
         vsb = ttk.Scrollbar(tma_preview_frame, orient='vertical', command=self.tma_action_preview.yview)
         hsb = ttk.Scrollbar(tma_preview_frame, orient='horizontal', command=self.tma_action_preview.xview)
@@ -794,12 +794,12 @@ class SettingsDialog(tk.Toplevel):
 
         # MHL Preview area
         mhl_preview_frame = tk.Frame(parent, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
-        mhl_preview_frame.pack(fill='both', expand=True)
+        mhl_preview_frame.pack(fill='x', pady=(0, PAD_Y))
         mhl_preview_frame.grid_rowconfigure(0, weight=1)
         mhl_preview_frame.grid_columnconfigure(0, weight=1)
 
         self.mhl_action_preview = tk.Text(mhl_preview_frame, font=FONT_MONO, bg=SURFACE, fg=TEXT_MAIN,
-                                           wrap='none', height=10, relief='flat', bd=0)
+                                           wrap='none', height=8, relief='flat', bd=0)
         self.mhl_action_preview.grid(row=0, column=0, sticky='nsew', padx=8, pady=8)
         vsb = ttk.Scrollbar(mhl_preview_frame, orient='vertical', command=self.mhl_action_preview.yview)
         hsb = ttk.Scrollbar(mhl_preview_frame, orient='horizontal', command=self.mhl_action_preview.xview)
@@ -835,12 +835,12 @@ class SettingsDialog(tk.Toplevel):
 
         # LA_Price Preview area
         la_preview_frame = tk.Frame(parent, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
-        la_preview_frame.pack(fill='both', expand=True)
+        la_preview_frame.pack(fill='x', pady=(0, PAD_Y))
         la_preview_frame.grid_rowconfigure(0, weight=1)
         la_preview_frame.grid_columnconfigure(0, weight=1)
 
         self.la_price_preview = tk.Text(la_preview_frame, font=FONT_MONO, bg=SURFACE, fg=TEXT_MAIN,
-                                         wrap='none', height=10, relief='flat', bd=0)
+                                         wrap='none', height=8, relief='flat', bd=0)
         self.la_price_preview.grid(row=0, column=0, sticky='nsew', padx=8, pady=8)
         vsb2 = ttk.Scrollbar(la_preview_frame, orient='vertical', command=self.la_price_preview.yview)
         hsb2 = ttk.Scrollbar(la_preview_frame, orient='horizontal', command=self.la_price_preview.xview)
