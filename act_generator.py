@@ -21,7 +21,8 @@ def generate_act_sheet(
         act_number='1',
         contract_no='260326',
         contract_date='01 березня 2026 року',
-        executor_name='ПрАТ «Аптеки Запоріжжя»'
+        executor_name='ПрАТ «Аптеки Запоріжжя»',
+        is_lic=True
 ):
     thin_border = Border(
         left=Side(style='thin', color='000000'),
@@ -92,47 +93,69 @@ def generate_act_sheet(
                 line.strip() for line in raw_req_text.split('\n') if line.strip()
             ]
 
+    # Act type for header
+    act_type = "ЛІК" if is_lic else "ДД"
+
+    # Row 1: "АКТ ДД|ЛІК №_____"
     ws.merge_cells('A1:E1')
-    ws['A1'] = f'АКТ № {act_number}'
+    ws['A1'] = f'АКТ {act_type} № _____'
     ws['A1'].font = Font(bold=True, size=11)
     ws['A1'].alignment = center_alignment
 
+    # Row 2: "про надання послуги, відповідно до Договору про маркетингові послуги {номер} від {дата}"
     ws.merge_cells('A2:E2')
     ws['A2'] = (
-        f'надання послуг (виконання робіт)\n'
-        f'до договору № {contract_no} від {contract_date}\n'
-        f'Замовник: {customer_name} | Виконавець: {executor_name}'
+        f'про надання послуги, відповідно до Договору про маркетингові послуги '
+        f'№ {contract_no} від {contract_date}'
     )
     ws['A2'].font = Font(bold=True, size=10)
     ws['A2'].alignment = center_alignment
-    ws.row_dimensions[2].height = 40
+    ws.row_dimensions[2].height = 30
 
-    ws['A4'] = 'м. Київ'
-    ws['A4'].font = Font(size=10)
-    ws['A4'].alignment = left_alignment
+    # Row 3: "між ТОВ "БАЙЄР" та {Клиент из базы данных}"
+    ws.merge_cells('A3:E3')
+    ws['A3'] = f'між ТОВ «БАЙЄР» та {customer_name}'
+    ws['A3'].font = Font(bold=True, size=10)
+    ws['A3'].alignment = center_alignment
+    ws.row_dimensions[3].height = 30
 
-    ws.merge_cells('D4:E4')
-    ws['D4'] = f'"{period_end[:2]}" {period_end[3:]}'
-    ws['D4'].font = Font(size=10)
-    ws['D4'].alignment = right_alignment
+    ws['A5'] = 'м. Київ'
+    ws['A5'].font = Font(size=10)
+    ws['A5'].alignment = left_alignment
 
-    ws.merge_cells('A6:E6')
-    ws['A6'] = (
+    ws.merge_cells('D5:E5')
+    # Format period_end properly (user enters in format YYYY-MM-DD, convert to DD.MM.YYYY)
+    try:
+        from datetime import datetime
+        end_dt = datetime.strptime(period_end, '%Y-%m-%d')
+        month_names = [
+            'січня', 'лютого', 'березня', 'квітня', 'травня', 'червня',
+            'липня', 'серпня', 'вересня', 'жовтня', 'листопада', 'грудня'
+        ]
+        period_end_formatted = f'"{end_dt.day:02d}" {month_names[end_dt.month - 1]} {end_dt.year} року'
+    except Exception:
+        period_end_formatted = period_end
+    ws['D5'] = period_end_formatted
+    ws['D5'].font = Font(size=10)
+    ws['D5'].alignment = right_alignment
+
+    ws.merge_cells('A7:E7')
+    ws['A7'] = (
         f'{executor_name} виконав, а {customer_name} прийняв наступні послуги '
         f'згідно з договором № {contract_no} від {contract_date}.'
     )
-    ws['A6'].font = Font(size=10)
-    ws['A6'].alignment = left_alignment
-    ws.row_dimensions[6].height = 35
+    ws['A7'].font = Font(size=10)
+    ws['A7'].alignment = left_alignment
+    ws.row_dimensions[7].height = 35
 
-    ws['A8'] = (
+    ws['A9'] = (
         f'1. Період надання послуг: з "{period_start}" по "{period_end}".'
     )
-    ws['A8'].font = Font(size=10)
-    ws['A9'] = '2. Якість послуг відповідає умовам договору.'
     ws['A9'].font = Font(size=10)
-    ws['A11'] = '3. Перелік наданих послуг:'
-    ws['A11'].font = Font(bold=True, size=10)
+    ws['A10'] = '2. Якість послуг відповідає умовам договору.'
+    ws['A10'].font = Font(size=10)
+    ws['A12'] = '3. Перелік наданих послуг:'
+    ws['A12'].font = Font(bold=True, size=10)
 
     headers = [
         'Найменування послуг',
@@ -142,11 +165,11 @@ def generate_act_sheet(
         'Загальна сума з ПДВ, грн.',
     ]
     for col_idx, h_text in enumerate(headers, start=1):
-        cell = ws.cell(row=13, column=col_idx, value=h_text)
+        cell = ws.cell(row=14, column=col_idx, value=h_text)
         cell.font = Font(bold=True, size=9)
         cell.alignment = center_alignment
         cell.border = thin_border
-    ws.row_dimensions[13].height = 25
+    ws.row_dimensions[14].height = 25
 
     # Послуга 1: Викладка
     sum1_no_vat = float(service1_sum)
@@ -175,7 +198,7 @@ def generate_act_sheet(
         ),
     ]
 
-    row_idx = 14
+    row_idx = 15
     for s_name, s_unit, s_sum, s_vat, s_tot in services_data:
         c1 = ws.cell(row=row_idx, column=1, value=s_name)
         c1.alignment = left_alignment

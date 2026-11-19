@@ -1603,7 +1603,8 @@ def generate_excel_report(
         act_number='1',
         contract_no=contract_no,
         contract_date=contract_date,
-        executor_name=executor_name
+        executor_name=executor_name,
+        is_lic=True
     )
 
     # ============================================================
@@ -1621,7 +1622,8 @@ def generate_excel_report(
         act_number='2',
         contract_no=contract_no,
         contract_date=contract_date,
-        executor_name=executor_name
+        executor_name=executor_name,
+        is_lic=False
     )
 
     # ============================================================
