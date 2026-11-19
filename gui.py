@@ -702,12 +702,28 @@ class SettingsDialog(tk.Toplevel):
             self._refresh_targets_table()
 
     def _build_tma_settings_tab(self, parent):
-        """TMA Settings - action percent file path and LA_Price file path."""
+        """TMA Settings - action percent file path, LA_Price file path, and MHL reward multiplier."""
         tk.Label(
             parent,
             text='Налаштування для аркушів "під час акції" (ТМА).',
             font=FONT_SMALL, bg=BG_COLOR, fg=TEXT_MUTED, wraplength=600, justify='left'
         ).pack(anchor='w', pady=(0, PAD_Y))
+
+        # --- MHL Reward Multiplier ---
+        multiplier_frame = tk.Frame(parent, bg=BG_COLOR)
+        multiplier_frame.pack(fill='x', pady=(0, PAD_Y))
+        multiplier_frame.columnconfigure(1, weight=1)
+
+        tk.Label(multiplier_frame, text='MHL відсоток винагороди:', font=FONT_BODY, bg=BG_COLOR, fg=TEXT_MAIN).grid(row=0, column=0, sticky='w', padx=(0, 10))
+        tk.Label(multiplier_frame, text='(0.1 = 10%, 0.15 = 15%)', font=FONT_SMALL, bg=BG_COLOR, fg=TEXT_MUTED).grid(row=0, column=2, sticky='w')
+        self.mhl_reward_multiplier_var = tk.StringVar(value=str(MHL_REWARD_MULTIPLIER))
+        multiplier_entry = tk.Entry(multiplier_frame, textvariable=self.mhl_reward_multiplier_var,
+                                     font=FONT_BODY, relief='solid', bd=1,
+                                     highlightthickness=1, highlightcolor=BORDER_FOCUS, highlightbackground=BORDER, width=10)
+        multiplier_entry.grid(row=0, column=1, sticky='w', padx=(0, 10))
+
+        ModernButton(multiplier_frame, text='Зберегти', style='primary',
+                    command=self._save_mhl_reward_multiplier).grid(row=0, column=3, sticky='e', padx=(10, 0))
 
         # --- MHL Action Percent File ---
         tk.Label(parent, text='Файл відсотків акції (MHL):', font=FONT_SUBTITLE, bg=BG_COLOR, fg=TEXT_MAIN).pack(anchor='w', pady=(PAD_Y, 4))
@@ -855,6 +871,21 @@ class SettingsDialog(tk.Toplevel):
         self.mhl_action_preview.insert('end', f'Завантажено SKU: {len(percents)}\n\n')
         for sku, pct in sorted(percents.items()):
             self.mhl_action_preview.insert('end', f'{sku}: {pct:.2f}%\n')
+
+    def _save_mhl_reward_multiplier(self):
+        """Save MHL reward multiplier to config."""
+        try:
+            value = float(self.mhl_reward_multiplier_var.get().strip() or 0.1)
+            if not 0 <= value <= 1:
+                raise ValueError
+        except ValueError:
+            messagebox.showwarning('Помилка', 'Відсоток має бути числом від 0 до 1 (напр. 0.1 для 10%)', parent=self)
+            return
+
+        import config as cfg
+        cfg.MHL_REWARD_MULTIPLIER = value
+        self.app.status_var.set(f'MHL відсоток винагороди оновлено: {value:.2f}')
+        messagebox.showinfo('Збережено', f'MHL відсоток винагороди: {value:.2f}\n(застосовано до поточної сесії)', parent=self)
 
     # --- LA_Price Methods ---
     def _select_la_price_file(self):
