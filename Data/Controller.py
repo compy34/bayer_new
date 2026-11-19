@@ -5,9 +5,15 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
-def get_pharmacy_data(period_start, period_end):
+def get_pharmacy_data(period_start, period_end, chain_name=None):
+    """Load pharmacy merchandising data from calc_Merch_KA.
+
+    Args:
+        period_start: Start date in YYYY-MM-DD format
+        period_end: End date in YYYY-MM-DD format
+        chain_name: Optional pharmacy chain/network name to filter by
+    """
     try:
-        # Налаштування підключення до MS SQL Server через Windows Auth та Native Client 11.0
         conn_str = (
             r'DRIVER={SQL Server Native Client 11.0};'
             r'SERVER=BYDE276YZ8D.bayer.cnb\I0940,58321;'
@@ -17,9 +23,6 @@ def get_pharmacy_data(period_start, period_end):
 
         connection = pyodbc.connect(conn_str)
 
-        # PERIOD в calc_Merch_KA зберігається як перший день місяця (напр. 2026-10-01).
-        # Користувач може ввести будь-яку дату в межах місяця — нормалізуємо на межі місяця.
-        # Використовуємо SQL функції для порівняння по року/місяцю.
         query = """
             SELECT
                 t.CHAIN_NAME,
@@ -31,17 +34,23 @@ def get_pharmacy_data(period_start, period_end):
             LEFT JOIN LA_Price p ON t.BRAND = p.Brand
             WHERE YEAR(t.PERIOD) * 100 + MONTH(t.PERIOD) BETWEEN YEAR(?) * 100 + MONTH(?) AND YEAR(?) * 100 + MONTH(?)
         """
-        # Передаємо параметри у вигляді кортежу
+
+        params = [period_start, period_start, period_end, period_end]
+
+        # Add chain filter if provided - use TRIM and case-insensitive comparison
+        if chain_name and chain_name.strip() and chain_name.strip() != 'Усі аптеки':
+            clean_chain = chain_name.strip()
+            query += " AND LTRIM(RTRIM(LOWER(t.CHAIN_NAME))) = LOWER(?)"
+            params.append(clean_chain)
 
         # DEBUG: Log query and params
         import logging
         logger = logging.getLogger(__name__)
         logger.debug(f"Pharmacy Query: {query}")
-        logger.debug(f"Pharmacy Params: ({period_start}, {period_start}, {period_end}, {period_end})")
+        logger.debug(f"Pharmacy Params: {params}")
 
-        df = pd.read_sql(query, connection, params=(period_start, period_start, period_end, period_end))
+        df = pd.read_sql(query, connection, params=params)
 
-        # DEBUG: Log result info
         logger.debug(f"Pharmacy Result: {len(df)} rows")
         if not df.empty:
             logger.debug(f"Pharmacy CHAIN_NAMEs: {df['CHAIN_NAME'].unique()[:10]}")

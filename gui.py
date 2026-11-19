@@ -439,7 +439,7 @@ class ReportApp:
             mhl_error = None
             offtake_error = None
             try:
-                data = get_pharmacy_data(*period)
+                data = get_pharmacy_data(*period, chain_name=selected_pharmacy if selected_pharmacy else None)
             except (OSError, TypeError, ValueError) as load_error:
                 data_error = load_error
             try:
