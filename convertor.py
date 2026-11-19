@@ -13,6 +13,7 @@ from config import (
     DEFAULT_TMA_CONTRACT_DATE,
     DEFAULT_EXECUTOR_NAME,
     MHL_REWARD_MULTIPLIER,
+    MHL_ACTION_PERCENT_FILE,
 )
 from chain_normalizer import normalize_chain_name, find_matching_chain
 
@@ -394,6 +395,110 @@ def get_all_penetration_targets():
         {'SKU_UA': k, 'TARGET': v} for k, v in _penetration_target_cache.items()
     ])
     return df.sort_values('SKU_UA')
+
+
+# ============================================================
+# MHL ACTION PERCENTAGE LOADER (for "під час акції" sheets)
+# ============================================================
+
+MHL_ACTION_PERCENT_FILE = Path(__file__).resolve().parent / MHL_ACTION_PERCENT_FILE
+_mhl_action_percent_cache = None
+_mhl_action_percent_lock = threading.Lock()
+
+
+def load_mhl_action_percents(filepath=None):
+    """Load action percentages from Excel file.
+
+    Expected file: MHL_Q3'2026.xlsx (configurable)
+    Sheet: "для договору"
+    Columns: №, SKU_ENG, SKU_UKR, Q3'26, %
+
+    Returns dict mapping SKU_UKR (normalized) -> percentage (float, 0-100)
+    """
+    global _mhl_action_percent_cache
+
+    if _mhl_action_percent_cache is not None:
+        return _mhl_action_percent_cache
+
+    file_to_load = Path(filepath) if filepath else MHL_ACTION_PERCENT_FILE
+
+    if not file_to_load.exists():
+        _mhl_action_percent_cache = {}
+        return _mhl_action_percent_cache
+
+    try:
+        df = pd.read_excel(file_to_load, sheet_name='для договору', dtype=str)
+        # Normalize column names
+        df.columns = df.columns.astype(str).str.strip()
+
+        # Find the percentage column (Q3'26, % or similar)
+        pct_col = None
+        for col in df.columns:
+            col_lower = col.strip().lower()
+            if 'q3' in col_lower and ('%' in col_lower or 'percent' in col_lower or 'відсоток' in col_lower):
+                pct_col = col
+                break
+
+        # Find SKU_UKR column
+        sku_col = None
+        for col in df.columns:
+            col_lower = col.strip().lower()
+            if 'sku_ukr' in col_lower or 'sku_укр' in col_lower or 'sku укр' in col_lower:
+                sku_col = col
+                break
+
+        if not pct_col or not sku_col:
+            print(f"Warning: Required columns not found in MHL action percent file. Columns: {list(df.columns)}")
+            _mhl_action_percent_cache = {}
+            return _mhl_action_percent_cache
+
+        # Build mapping: SKU_UKR (normalized) -> percentage
+        _mhl_action_percent_cache = {}
+        for _, row in df.iterrows():
+            sku = str(row.get(sku_col, '')).strip()
+            pct_str = str(row.get(pct_col, '')).strip()
+
+            if sku and pct_str:
+                try:
+                    # Handle percentage strings like "10%", "10.5%", "0.1", "10"
+                    pct_clean = pct_str.replace('%', '').replace(',', '.').strip()
+                    pct_val = float(pct_clean)
+                    # If value > 1, assume it's already in percent (e.g., 10 = 10%)
+                    # If value <= 1, assume it's a fraction (e.g., 0.1 = 10%)
+                    if pct_val > 1:
+                        pct_val = pct_val  # already percent
+                    else:
+                        pct_val = pct_val * 100  # convert fraction to percent
+
+                    _mhl_action_percent_cache[sku.casefold()] = pct_val
+                except ValueError:
+                    continue
+
+        return _mhl_action_percent_cache
+
+    except Exception as e:
+        print(f"Error loading MHL action percentages: {e}")
+        _mhl_action_percent_cache = {}
+        return _mhl_action_percent_cache
+
+
+def get_mhl_action_percent(sku_ukr):
+    """Get action percentage for a SKU.
+    Returns percentage as float (e.g., 10.0 for 10%), or 0.0 if not found.
+    """
+    load_mhl_action_percents()
+    if _mhl_action_percent_cache is None:
+        return 0.0
+    normalized = str(sku_ukr).strip().casefold()
+    return _mhl_action_percent_cache.get(normalized, 0.0)
+
+
+def set_mhl_action_percent_file(filepath):
+    """Update the MHL action percent file path and reload."""
+    global MHL_ACTION_PERCENT_FILE, _mhl_action_percent_cache
+    MHL_ACTION_PERCENT_FILE = Path(filepath)
+    _mhl_action_percent_cache = None  # Force reload
+    return load_mhl_action_percents()
 
 
 # ============================================================
@@ -1251,8 +1356,8 @@ def fill_tma_worksheet(ws, template_brands, period_start, period_end, executor_n
         # Get PRICE_CP from MHL data (actual purchase price), fallback to base_price
         price_cp = mhl_price_map.get(sku_name.casefold(), base_price)
 
-        # Discount - placeholder 0%
-        discount_pct = 0.0
+        # Discount - use action percentage from MHL action percent file
+        discount_pct = get_mhl_action_percent(sku_name)
 
         # Quantity sold by executor - use offtake data if available
         sku_normalized = sku_name.casefold()

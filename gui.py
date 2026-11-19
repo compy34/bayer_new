@@ -15,6 +15,7 @@ from config import (
     LIK_BRANDS_TEMPLATE,
     DD_BRANDS_TEMPLATE,
     MHL_REWARD_MULTIPLIER,
+    MHL_ACTION_PERCENT_FILE,
 )
 from convertor import (
     build_report_dataframe,
@@ -31,6 +32,8 @@ from convertor import (
     set_tma_auth_amount,
     get_all_penetration_targets,
     set_penetration_target,
+    load_mhl_action_percents,
+    set_mhl_action_percent_file,
 )
 from Data.Controller import get_mhl_data, get_pharmacy_data, load_requisites_file, get_tma_offtake_data, DataLoadError
 
@@ -176,6 +179,11 @@ class SettingsDialog(tk.Toplevel):
         targets_frame = tk.Frame(notebook, bg=BG_COLOR)
         notebook.add(targets_frame, text='  Цілі проникнення  ')
         self._build_targets_tab(targets_frame)
+
+        # --- Tab 6: TMA Settings ---
+        tma_settings_frame = tk.Frame(notebook, bg=BG_COLOR)
+        notebook.add(tma_settings_frame, text='  ТМА Налаштування  ')
+        self._build_tma_settings_tab(tma_settings_frame)
 
         # Close button
         btn_frame = tk.Frame(self, bg=BG_COLOR)
@@ -687,6 +695,119 @@ class SettingsDialog(tk.Toplevel):
                 sku = values[0]
                 set_penetration_target(sku, None)  # None = remove override
             self._refresh_targets_table()
+
+    def _build_tma_settings_tab(self, parent):
+        """TMA Settings - action percent file path."""
+        tk.Label(
+            parent,
+            text='Налаштування для аркушів "під час акції" (ТМА).\nФайл з відсотками акції: аркуш "для договору", колонки SKU_UKR та Q3\'26, %.',
+            font=FONT_SMALL, bg=BG_COLOR, fg=TEXT_MUTED, wraplength=600, justify='left'
+        ).pack(anchor='w', pady=(0, PAD_Y))
+
+        # File path setting
+        file_frame = tk.Frame(parent, bg=BG_COLOR)
+        file_frame.pack(fill='x', pady=(0, PAD_Y))
+        file_frame.columnconfigure(1, weight=1)
+
+        tk.Label(file_frame, text='Файл відсотків акції:', font=FONT_BODY, bg=BG_COLOR, fg=TEXT_MAIN).grid(row=0, column=0, sticky='w', padx=(0, 10))
+        self.mhl_action_file_var = tk.StringVar(value=MHL_ACTION_PERCENT_FILE)
+        file_entry = tk.Entry(file_frame, textvariable=self.mhl_action_file_var,
+                               font=FONT_BODY, relief='solid', bd=1,
+                               highlightthickness=1, highlightcolor=BORDER_FOCUS, highlightbackground=BORDER)
+        file_entry.grid(row=0, column=1, sticky='ew', padx=(0, 10))
+
+        ModernButton(file_frame, text='Обрати...', style='outline',
+                    command=self._select_mhl_action_file).grid(row=0, column=2, sticky='e')
+
+        # Reload button
+        btn_frame = tk.Frame(parent, bg=BG_COLOR)
+        btn_frame.pack(fill='x', pady=(0, PAD_Y))
+        ModernButton(btn_frame, text='🔄 Перезавантажити файл', style='primary',
+                    command=self._reload_mhl_action_file).pack(side='left')
+        ModernButton(btn_frame, text='📋 Показати завантажені відсотки', style='secondary',
+                    command=self._show_mhl_action_percents).pack(side='left', padx=(10, 0))
+
+        # Preview area
+        preview_frame = tk.Frame(parent, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
+        preview_frame.pack(fill='both', expand=True)
+        preview_frame.grid_rowconfigure(0, weight=1)
+        preview_frame.grid_columnconfigure(0, weight=1)
+
+        self.mhl_action_preview = tk.Text(preview_frame, font=FONT_MONO, bg=SURFACE, fg=TEXT_MAIN,
+                                           wrap='none', height=15, relief='flat', bd=0)
+        self.mhl_action_preview.grid(row=0, column=0, sticky='nsew', padx=8, pady=8)
+        vsb = ttk.Scrollbar(preview_frame, orient='vertical', command=self.mhl_action_preview.yview)
+        hsb = ttk.Scrollbar(preview_frame, orient='horizontal', command=self.mhl_action_preview.xview)
+        self.mhl_action_preview.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+        vsb.grid(row=0, column=1, sticky='ns')
+        hsb.grid(row=1, column=0, sticky='ew')
+
+        self._refresh_mhl_action_preview()
+
+    def _select_mhl_action_file(self):
+        filename = filedialog.askopenfilename(
+            title='Виберіть файл відсотків акції (MHL)',
+            initialdir=str(Path.cwd()),
+            filetypes=[('Excel', '*.xlsx *.xls'), ('Усі файли', '*.*')]
+        )
+        if filename:
+            self.mhl_action_file_var.set(filename)
+
+    def _reload_mhl_action_file(self):
+        filepath = self.mhl_action_file_var.get().strip()
+        if not filepath:
+            messagebox.showwarning('Попередження', 'Вкажіть шлях до файлу', parent=self)
+            return
+        try:
+            set_mhl_action_percent_file(filepath)
+            self._refresh_mhl_action_preview()
+            self.app.status_var.set(f'Файл відсотків акції завантажено: {filepath}')
+        except Exception as e:
+            messagebox.showerror('Помилка', f'Не вдалося завантажити файл: {e}', parent=self)
+
+    def _show_mhl_action_percents(self):
+        """Show loaded action percentages in a separate window."""
+        from convertor import load_mhl_action_percents
+        filepath = self.mhl_action_file_var.get().strip()
+        percents = load_mhl_action_percents(filepath) if filepath else {}
+
+        win = tk.Toplevel(self)
+        win.title('Завантажені відсотки акції')
+        win.geometry('600x400')
+        win.configure(bg=BG_COLOR)
+
+        tree = ttk.Treeview(win, columns=('SKU', 'PERCENT'), show='headings')
+        tree.heading('SKU', text='SKU / Назва')
+        tree.heading('PERCENT', text='Відсоток (%)')
+        tree.column('SKU', width=400, anchor='w')
+        tree.column('PERCENT', width=100, anchor='center')
+
+        for sku, pct in sorted(percents.items()):
+            tree.insert('', 'end', values=(sku, f'{pct:.2f}'))
+
+        vsb = ttk.Scrollbar(win, orient='vertical', command=tree.yview)
+        tree.configure(yscrollcommand=vsb.set)
+        tree.grid(row=0, column=0, sticky='nsew', padx=PAD_X, pady=PAD_X)
+        vsb.grid(row=0, column=1, sticky='ns')
+        win.grid_rowconfigure(0, weight=1)
+        win.grid_columnconfigure(0, weight=1)
+
+        tk.Label(win, text=f'Всього SKU: {len(percents)}', font=FONT_SMALL, bg=BG_COLOR, fg=TEXT_MUTED).grid(row=1, column=0, sticky='w', padx=PAD_X, pady=(0, PAD_X))
+
+    def _refresh_mhl_action_preview(self):
+        from convertor import load_mhl_action_percents
+        filepath = self.mhl_action_file_var.get().strip()
+        percents = load_mhl_action_percents(filepath) if filepath else {}
+
+        self.mhl_action_preview.delete('1.0', 'end')
+        if not percents:
+            self.mhl_action_preview.insert('end', f'Файл не знайдено або порожній: {filepath}')
+            return
+
+        self.mhl_action_preview.insert('end', f'Файл: {filepath}\n')
+        self.mhl_action_preview.insert('end', f'Завантажено SKU: {len(percents)}\n\n')
+        for sku, pct in sorted(percents.items()):
+            self.mhl_action_preview.insert('end', f'{sku}: {pct:.2f}%\n')
 
 
 class ReportApp:

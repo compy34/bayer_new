@@ -78,6 +78,10 @@ DD_BRANDS_TEMPLATE = [
 # 0.1 = 10%
 MHL_REWARD_MULTIPLIER = 0.1
 
+# MHL action percentage file path (for "під час акції" sheets)
+# Default file: MHL_Q3'2026.xlsx, sheet "для договору", columns: SKU_UKR -> Q3'26, %
+MHL_ACTION_PERCENT_FILE = "MHL_Q3'2026.xlsx"
+
 # Database connection
 DB_CONNECTION_STRING = (
     r'DRIVER={SQL Server Native Client 11.0};'
