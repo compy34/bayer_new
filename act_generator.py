@@ -327,7 +327,7 @@ def generate_act_sheet(
 def generate_tma_act_sheet(
         ws,
         df_req,
-        tma_calculated_sum,  # "Всього вартість послуг" from TMA sheet (calculated services only)
+        tma_subtotal_no_vat,  # "Всього без ПДВ" from TMA sheet (services + auth)
         period_start,
         period_end,
         selected_pharmacy='Усі аптеки',
@@ -515,8 +515,8 @@ def generate_tma_act_sheet(
         uah_text = num2words(uah_int, lang='uk')
         return f'{uah_text} грн. {kop:02d} коп.'
 
-    # Calculate amounts
-    total_no_vat = float(tma_calculated_sum)
+    # Calculate amounts (tma_subtotal_no_vat already includes services + auth)
+    total_no_vat = float(tma_subtotal_no_vat)
     vat_amount = total_no_vat * 0.2
     total_with_vat = total_no_vat + vat_amount
 

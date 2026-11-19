@@ -1634,7 +1634,7 @@ def generate_excel_report(
     generate_tma_act_sheet(
         ws=ws_akt_tma_lik,
         df_req=df_req,
-        tma_calculated_sum=tma_lik_amounts['total_services'] if tma_lik_amounts else 0,
+        tma_calculated_sum=tma_lik_amounts['subtotal_no_vat'] if tma_lik_amounts else 0,
         period_start=period_start,
         period_end=period_end,
         selected_pharmacy=selected_pharmacy,
@@ -1652,7 +1652,7 @@ def generate_excel_report(
     generate_tma_act_sheet(
         ws=ws_akt_tma_dd,
         df_req=df_req,
-        tma_calculated_sum=tma_dd_amounts['total_services'] if tma_dd_amounts else 0,
+        tma_calculated_sum=tma_dd_amounts['subtotal_no_vat'] if tma_dd_amounts else 0,
         period_start=period_start,
         period_end=period_end,
         selected_pharmacy=selected_pharmacy,
