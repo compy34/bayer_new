@@ -1124,6 +1124,7 @@ def fill_tma_worksheet(ws, template_brands, period_start, period_end, executor_n
 
     # --- Build offtake map: SKU_UA (normalized) -> total OFFTAKE ---
     offtake_map = {}
+    unmapped_drug_ids = set()
     if offtake_df is not None and not offtake_df.empty:
         # Offtake data has columns: DATE, CHAIN_ID, CHAIN_NAME, DRUG_ID, OFFTAKE
         # We need to map DRUG_ID to SKU_UA using drug_id_to_sku
@@ -1136,6 +1137,18 @@ def fill_tma_worksheet(ws, template_brands, period_start, period_end, executor_n
                     sku_normalized = drug_id_to_sku[drug_id_int]
                     # Sum offtake across all dates for this SKU
                     offtake_map[sku_normalized] = offtake_map.get(sku_normalized, 0) + float(offtake)
+                else:
+                    unmapped_drug_ids.add(drug_id_int)
+
+    # Log warning for unmapped DRUG_IDs (offtake will be 0 for these)
+    if unmapped_drug_ids:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(
+            f"TMA Offtake: {len(unmapped_drug_ids)} DRUG_ID(s) not found in MHL data "
+            f"(offtake will be 0): {sorted(unmapped_drug_ids)[:20]}"
+            + ("..." if len(unmapped_drug_ids) > 20 else "")
+        )
 
     # --- Data rows ---
     data_start_row = row
@@ -1155,9 +1168,17 @@ def fill_tma_worksheet(ws, template_brands, period_start, period_end, executor_n
         # Quantity sold by executor - use offtake data if available
         sku_normalized = sku_name.casefold()
         qty_sold = offtake_map.get(sku_normalized, 0.0)
+        qty_source = 'offtake'
         # Fallback to MHL supply if no offtake data (placeholder)
         if qty_sold == 0.0:
             qty_sold = mhl_supply_map.get(sku_normalized, 0.0)
+            qty_source = 'mhl_supply'
+
+        # Warn if SKU has zero quantity (no offtake, no MHL supply)
+        if qty_sold == 0.0:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"TMA: SKU '{sku_name}' has 0 qty (no offtake, no MHL supply)")
 
         # Period for column 6
         period_display = f'{end_last_day.month:02d}.{end_last_day.year}'
