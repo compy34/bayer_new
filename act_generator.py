@@ -69,9 +69,9 @@ def generate_act_sheet(
         executor_name = str(
             matched_row.get('Виконавець', matched_row.get('Юридическое лицо', executor_name))
         )
-        # Замовник — з колонки "Юридическое лицо" (якщо є), інакше дефолт
+        # Замовник — з колонки "Клиент из базы данных" (якщо є), інакше дефолт
         customer_name = str(
-            matched_row.get('Юридическое лицо', customer_name)
+            matched_row.get('Клиент из базы данных', customer_name)
         )
         contract_no = str(matched_row.get('№ договора', contract_no))
         contract_date = str(matched_row.get('Дата договора', contract_date))
