@@ -436,8 +436,9 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
     title_font = Font(bold=True, size=12)         # For titles - bold 12pt
 
     num_brands = len(template_brands)
-    # Columns: A=№, B=Pharmacy, C=Responsible (hidden), D... = brands, last = Total
-    brand_start_col = 4
+    # Columns: A=№, B=Pharmacy, C=first brand, ... = brands, last = Total
+    # "Відповідальна особа" column completely removed - brands start at column 3
+    brand_start_col = 3
     brand_end_col = brand_start_col + num_brands - 1
     total_col = brand_end_col + 1
     end_col = total_col
@@ -495,12 +496,6 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
         cell.alignment = center
         cell.border = thin_border
 
-    # Empty header for hidden "Відповідальна особа" column (column 3) - with borders to avoid visual gap
-    empty_header_cell = ws.cell(9, 3, '')
-    empty_header_cell.font = header_font
-    empty_header_cell.alignment = center
-    empty_header_cell.border = thin_border
-
     # Brand section header - spans across all brand columns (from brand_start_col to brand_end_col)
     ws.merge_cells(start_row=9, start_column=brand_start_col, end_row=9, end_column=brand_end_col)
     brand_header_cell = ws.cell(9, brand_start_col, 'Бренди Товару, щодо яких надавалися маркетингові послуги, кількість викладок')
@@ -512,12 +507,6 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
         ws.cell(9, col).border = thin_border
 
     # --- Row 10: Brand sub-headers ---
-    # Empty cell for hidden "Відповідальна особа" column (column 3) in sub-headers row
-    empty_sub_header = ws.cell(10, 3, '')
-    empty_sub_header.font = header_font
-    empty_sub_header.alignment = center
-    empty_sub_header.border = thin_border
-
     for i, brand in enumerate(template_brands):
         cell = ws.cell(10, brand_start_col + i, brand)
         cell.font = header_font
@@ -536,9 +525,6 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
     # --- Data rows ---
     start_data_row = 11
 
-    # Hide "Відповідальна особа" column (column 3)
-    ws.column_dimensions['C'].hidden = True
-
     for idx, row_data in enumerate(pivot_df.iterrows(), start=start_data_row):
         row_values = row_data[1]
         pharmacy_name = row_values['PHARMACY_NAME']
@@ -554,11 +540,6 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
         cell.font = normal_font
         cell.alignment = left
         cell.border = thin_border
-
-        # Empty cell for hidden "Відповідальна особа" column (column 3) - with borders to avoid visual gap
-        empty_cell = ws.cell(idx, 3, '')
-        empty_cell.font = normal_font
-        empty_cell.border = thin_border
 
         # Brand quantities
         row_total = 0
@@ -713,9 +694,6 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
 
     # Write MHL data rows
     mhl_first_data_row = mhl_header_row + 1
-
-    # Hide "Бренд" column (column 3)
-    ws.column_dimensions['C'].hidden = True
 
     for idx, mhl_row in enumerate(mhl_data_rows, start=mhl_first_data_row):
         ws.cell(idx, 1, idx - mhl_first_data_row + 1).font = normal_font
