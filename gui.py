@@ -19,7 +19,7 @@ from convertor import (
     get_tma_auth_amount,
     set_tma_auth_amount,
 )
-from Data.Controller import get_mhl_data, get_pharmacy_data, load_requisites_file
+from Data.Controller import get_mhl_data, get_pharmacy_data, load_requisites_file, get_tma_offtake_data
 
 
 # ============================================================
@@ -434,8 +434,10 @@ class ReportApp:
         def load():
             data = None
             mhl_data = None
+            tma_offtake_data = None
             data_error = None
             mhl_error = None
+            offtake_error = None
             try:
                 data = get_pharmacy_data(*period)
             except (OSError, TypeError, ValueError) as load_error:
@@ -445,20 +447,26 @@ class ReportApp:
                 mhl_data = get_mhl_data(*period, chain_name=selected_pharmacy if selected_pharmacy else None)
             except (OSError, TypeError, ValueError) as load_error:
                 mhl_error = load_error
+            try:
+                # Load TMA offtake data (sold quantities)
+                tma_offtake_data = get_tma_offtake_data(*period, chain_name=selected_pharmacy if selected_pharmacy else None)
+            except (OSError, TypeError, ValueError) as load_error:
+                offtake_error = load_error
             self.root.after(
                 0,
                 lambda: self._data_loaded(
-                    data, mhl_data, period, data_error, mhl_error
+                    data, mhl_data, tma_offtake_data, period, data_error, mhl_error, offtake_error
                 ),
             )
 
         threading.Thread(target=load, daemon=True).start()
 
-    def _data_loaded(self, data, mhl_data, period, data_error=None, mhl_error=None):
+    def _data_loaded(self, data, mhl_data, tma_offtake_data, period, data_error=None, mhl_error=None, offtake_error=None):
         self.loading = False
         self.load_button.configure(state='normal')
         self.df = data
         self.df_mhl = mhl_data
+        self.df_tma_offtake = tma_offtake_data
 
         has_pharmacy = data is not None and not data.empty
         has_mhl = mhl_data is not None and not mhl_data.empty
@@ -679,6 +687,8 @@ class ReportApp:
                 period_end=end,
                 selected_pharmacy=self.pharmacy_name_var.get(),
                 mhl_df=self._filtered_mhl_data(),  # Filter MHL by current selection (match pharmacy data)
+                full_mhl_df=self.df_mhl,  # Full MHL data for DRUG_ID -> SKU mapping
+                offtake_df=self.df_tma_offtake,  # Pass TMA offtake data for sold quantities
             )
         except (OSError, ValueError, KeyError) as error:
             messagebox.showerror('Помилка', str(error))

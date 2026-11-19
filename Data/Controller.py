@@ -152,3 +152,64 @@ def load_requisites_file(filename):
     # Очищуємо заголовки колонок від зайвих пробілів
     df_req.columns = df_req.columns.astype(str).str.strip()
     return df_req.fillna('')
+
+
+def get_tma_offtake_data(period_start, period_end, chain_name=None):
+    """Load TMA offtake (sold quantity) data from dbo.supply_KA_TMA.
+
+    Args:
+        period_start: Start date in YYYY-MM-DD format
+        period_end: End date in YYYY-MM-DD format
+        chain_name: Optional pharmacy chain/network name to filter by
+    Returns:
+        DataFrame with columns: DATE, CHAIN_ID, CHAIN_NAME, DRUG_ID, OFFTAKE
+    """
+    connection = None
+    try:
+        conn_str = (
+            r'DRIVER={SQL Server Native Client 11.0};'
+            r'SERVER=BYDE276YZ8D.bayer.cnb\I0940,58321;'
+            r'DATABASE=BAYER_CH_UA;'
+            r'Trusted_Connection=yes;'
+        )
+        connection = pyodbc.connect(conn_str)
+
+        query = """
+            SELECT
+                t.[DATE],
+                t.[CHAIN_ID],
+                t.[CHAIN_NAME],
+                t.[DRUG_ID],
+                t.[OFFTAKE]
+            FROM [dbo].[supply_KA_TMA] AS t
+            WHERE t.[DATE] >= ? AND t.[DATE] <= ?
+        """
+
+        params = [period_start, period_end]
+
+        # Add chain filter if provided
+        if chain_name and chain_name.strip() and chain_name.strip() != 'Усі аптеки':
+            clean_chain = chain_name.strip()
+            query += " AND LTRIM(RTRIM(LOWER(t.[CHAIN_NAME]))) = LOWER(?)"
+            params.append(clean_chain)
+
+        # DEBUG
+        import logging
+        logging.basicConfig(level=logging.DEBUG)
+        logger = logging.getLogger(__name__)
+        logger.debug(f"TMA Offtake Query: {query}")
+        logger.debug(f"TMA Offtake Params: {params}")
+
+        df = pd.read_sql(query, connection, params=params)
+
+        logger.debug(f"TMA Offtake Result: {len(df)} rows")
+        if not df.empty:
+            logger.debug(f"TMA Offtake CHAIN_NAMEs: {df['CHAIN_NAME'].unique()[:10]}")
+            logger.debug(f"TMA Offtake DRUG_IDs: {df['DRUG_ID'].nunique()}")
+
+        return df
+    except pyodbc.Error as error:
+        raise OSError(f'Помилка завантаження TMA offtake з MS SQL Server: {error}') from error
+    finally:
+        if connection is not None:
+            connection.close()

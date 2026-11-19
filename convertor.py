@@ -975,7 +975,7 @@ def get_all_sku_for_category(template_brands):
 
 
 def fill_tma_worksheet(ws, template_brands, period_start, period_end, executor_name,
-                       contract_no, contract_date, selected_pharmacy, mhl_df, is_lic=True, df_req=None):
+                       contract_no, contract_date, selected_pharmacy, mhl_df, full_mhl_df=None, is_lic=True, df_req=None, offtake_df=None):
     """Fill 'Під час акції' sheet with full TMA report structure."""
 
     thin_border = Border(
@@ -1067,32 +1067,72 @@ def fill_tma_worksheet(ws, template_brands, period_start, period_end, executor_n
     sku_data = get_all_sku_for_category(template_brands)
 
     # --- Try to get PRICE_CP from MHL data for each SKU ---
-    # Build a map of SKU -> PRICE_CP from MHL data
+    # Build a map of SKU -> PRICE_CP from MHL data (filtered by pharmacy)
     mhl_price_map = {}
     mhl_supply_map = {}  # placeholder for future "sold by executor"
+    # Build DRUG_ID -> SKU_UA mapping from FULL MHL data for offtake lookup
+    drug_id_to_sku = {}
 
-    if mhl_df is not None and not mhl_df.empty:
-        sku_col = 'SKU_UA' if 'SKU_UA' in mhl_df.columns else 'Назва товару'
-        work_df = mhl_df.copy()
+    # Use full_mhl_df for DRUG_ID -> SKU mapping (to include all products across all pharmacies)
+    # Fall back to mhl_df if full_mhl_df not provided
+    mapping_df = full_mhl_df if full_mhl_df is not None else mhl_df
+
+    if mapping_df is not None and not mapping_df.empty:
+        sku_col = 'SKU_UA' if 'SKU_UA' in mapping_df.columns else 'Назва товару'
+        work_df = mapping_df.copy()
         # Filter to relevant SKUs
         allowed_skus = {str(v).strip().casefold() for v in (get_mhl_lik_sku() if is_lic else get_mhl_dd_sku())}
         sku_values = work_df[sku_col].fillna('').astype(str).str.strip().str.casefold()
         work_df = work_df[sku_values.isin(allowed_skus)].copy()
 
         if not work_df.empty:
-            for column in ['PRICE_CP', 'SUPPLY']:
-                work_df[column] = pd.to_numeric(work_df[column], errors='coerce')
+            for column in ['PRICE_CP', 'SUPPLY', 'DRUG_ID']:
+                if column in work_df.columns:
+                    work_df[column] = pd.to_numeric(work_df[column], errors='coerce')
 
-            # Get latest PRICE_CP per SKU
+            # Build DRUG_ID -> SKU_UA mapping (from full data)
+            for _, mhl_row in work_df.iterrows():
+                sku_name = str(mhl_row.get(sku_col, '')).strip()
+                drug_id = mhl_row.get('DRUG_ID')
+                if sku_name and pd.notna(drug_id):
+                    drug_id_to_sku[int(drug_id)] = sku_name.casefold()
+
+    # Use mhl_df (filtered by pharmacy) for PRICE_CP and SUPPLY
+    if mhl_df is not None and not mhl_df.empty:
+        sku_col = 'SKU_UA' if 'SKU_UA' in mhl_df.columns else 'Назва товару'
+        work_df = mhl_df.copy()
+        allowed_skus = {str(v).strip().casefold() for v in (get_mhl_lik_sku() if is_lic else get_mhl_dd_sku())}
+        sku_values = work_df[sku_col].fillna('').astype(str).str.strip().str.casefold()
+        work_df = work_df[sku_values.isin(allowed_skus)].copy()
+
+        if not work_df.empty:
+            for column in ['PRICE_CP', 'SUPPLY']:
+                if column in work_df.columns:
+                    work_df[column] = pd.to_numeric(work_df[column], errors='coerce')
+
+            # Get latest PRICE_CP per SKU from pharmacy-specific data
             for _, mhl_row in work_df.iterrows():
                 sku_name = str(mhl_row.get(sku_col, '')).strip()
                 if sku_name:
                     if pd.notna(mhl_row.get('PRICE_CP')):
                         mhl_price_map[sku_name.casefold()] = mhl_row['PRICE_CP']
                     if pd.notna(mhl_row.get('SUPPLY')):
-                        # This is SUPPLY (purchased by network), not sold by executor
-                        # But we'll use it as placeholder until proper field exists
                         mhl_supply_map[sku_name.casefold()] = mhl_row['SUPPLY']
+
+    # --- Build offtake map: SKU_UA (normalized) -> total OFFTAKE ---
+    offtake_map = {}
+    if offtake_df is not None and not offtake_df.empty:
+        # Offtake data has columns: DATE, CHAIN_ID, CHAIN_NAME, DRUG_ID, OFFTAKE
+        # We need to map DRUG_ID to SKU_UA using drug_id_to_sku
+        for _, row in offtake_df.iterrows():
+            drug_id = row.get('DRUG_ID')
+            offtake = row.get('OFFTAKE')
+            if pd.notna(drug_id) and pd.notna(offtake):
+                drug_id_int = int(drug_id)
+                if drug_id_int in drug_id_to_sku:
+                    sku_normalized = drug_id_to_sku[drug_id_int]
+                    # Sum offtake across all dates for this SKU
+                    offtake_map[sku_normalized] = offtake_map.get(sku_normalized, 0) + float(offtake)
 
     # --- Data rows ---
     data_start_row = row
@@ -1109,11 +1149,12 @@ def fill_tma_worksheet(ws, template_brands, period_start, period_end, executor_n
         # Discount - placeholder 0%
         discount_pct = 0.0
 
-        # Quantity sold by executor - placeholder 0.00
-        # TODO: Replace with actual "sold by executor" field from DB when available
-        qty_sold = 0.0
-        # For now, can optionally use SUPPLY from MHL as placeholder:
-        # qty_sold = mhl_supply_map.get(sku_name.casefold(), 0.0)
+        # Quantity sold by executor - use offtake data if available
+        sku_normalized = sku_name.casefold()
+        qty_sold = offtake_map.get(sku_normalized, 0.0)
+        # Fallback to MHL supply if no offtake data (placeholder)
+        if qty_sold == 0.0:
+            qty_sold = mhl_supply_map.get(sku_normalized, 0.0)
 
         # Period for column 6
         period_display = f'{end_last_day.month:02d}.{end_last_day.year}'
@@ -1397,6 +1438,8 @@ def generate_excel_report(
         period_end=None,
         selected_pharmacy='Усі аптеки',
         mhl_df=None,
+        full_mhl_df=None,
+        offtake_df=None,
 ):
     """Generate Excel report with 8 sheets matching template exactly:
     1. акт_ЛІК
@@ -1563,8 +1606,10 @@ def generate_excel_report(
         contract_date=contract_date,
         selected_pharmacy=selected_pharmacy,
         mhl_df=mhl_df,
+        full_mhl_df=full_mhl_df,
         is_lic=True,
-        df_req=df_req
+        df_req=df_req,
+        offtake_df=offtake_df
     )
 
     # ============================================================
@@ -1581,8 +1626,10 @@ def generate_excel_report(
         contract_date=contract_date,
         selected_pharmacy=selected_pharmacy,
         mhl_df=mhl_df,
+        full_mhl_df=full_mhl_df,
         is_lic=False,
-        df_req=df_req
+        df_req=df_req,
+        offtake_df=offtake_df
     )
 
     # ============================================================
