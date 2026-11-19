@@ -1268,10 +1268,6 @@ def fill_tma_worksheet(ws, template_brands, period_start, period_end, executor_n
         top=Side(style='thin'), bottom=Side(style='double')
     )
     ws.cell(row, 7).number_format = '#,##0.00'
-    # Empty borders for columns 1-5
-    for c in range(1, 6):
-        if c != 6:
-            ws.cell(row, c).border = thin_border
     subtotal_row = row
     row += 1
 
@@ -1287,9 +1283,6 @@ def fill_tma_worksheet(ws, template_brands, period_start, period_end, executor_n
         top=Side(style='thin'), bottom=Side(style='double')
     )
     ws.cell(row, 7).number_format = '#,##0.00'
-    for c in range(1, 6):
-        if c != 6:
-            ws.cell(row, c).border = thin_border
     row += 1
 
     # 5. Разом з ПДВ
@@ -1304,9 +1297,6 @@ def fill_tma_worksheet(ws, template_brands, period_start, period_end, executor_n
         top=Side(style='thin'), bottom=Side(style='double')
     )
     ws.cell(row, 7).number_format = '#,##0.00'
-    for c in range(1, 6):
-        if c != 6:
-            ws.cell(row, c).border = thin_border
 
     # ============================================================
     # PHOTO SECTION (Фотопідтвердження)
