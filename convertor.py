@@ -3,6 +3,17 @@ from datetime import datetime, timedelta
 from openpyxl.styles import Alignment, Border, Font, Side
 from openpyxl.utils import get_column_letter
 from act_generator import generate_act_sheet, generate_tma_act_sheet
+from config import (
+    SERVICE_PRICES,
+    DB_BRAND_TO_TEMPLATE,
+    LIK_BRANDS_TEMPLATE,
+    DD_BRANDS_TEMPLATE,
+    DEFAULT_CONTRACT_NO,
+    DEFAULT_CONTRACT_DATE,
+    DEFAULT_TMA_CONTRACT_DATE,
+    DEFAULT_EXECUTOR_NAME,
+)
+from chain_normalizer import normalize_chain_name, find_matching_chain
 
 
 def format_date_ukrainian(date_str):
@@ -26,88 +37,19 @@ def get_last_day_of_month(date_str):
     return last_day.strftime('%Y-%m-%d')
 
 # ============================================================
-# BRAND LISTS FROM TEMPLATE
-# ============================================================
-
-# Template brands for LIC (лікарські засоби) - from звіт викладка+MHL(ЛІК) row 10
-LIK_BRANDS_TEMPLATE = [
-    'Антифлу',
-    'Бепантен',
-    'Бепантен Плюс',
-    'Елевіт-3',
-    'Еріус',
-    'Реліф',
-    'Супрадин-10',
-    'Ренні',
-    'Терафлекс + Тералів',
-]
-
-# Template brands for DD (не лікарські засоби) - from звіт викладка+MHL(ДД) row 10
-DD_BRANDS_TEMPLATE = [
-    'Елевіт',
-    'Супрадин-13',
-    'Супрадин-10',
-    'Бепантен Сенсідерм-4',
-    'Бепантен Сенсідерм-2',
-]
-
-# Database brand mapping (from calc_Merch_KA BRAND column to template brand names)
-DB_BRAND_TO_TEMPLATE = {
-    # LIC brands
-    'Антифлу': 'Антифлу',
-    'Бепантен': 'Бепантен',
-    'Бепантен Плюс': 'Бепантен Плюс',
-    'Елевіт-3': 'Елевіт-3',
-    'Еріус': 'Еріус',
-    'Реліф': 'Реліф',
-    'Супрадин-10': 'Супрадин-10',
-    'Супрадин-10__': 'Супрадин-10',
-    'Ренні': 'Ренні',
-    'Терафлекс + Тералів': 'Терафлекс + Тералів',
-    'Терафлекс': 'Терафлекс + Тералів',  # map to combined
-    'Тералів': 'Терафлекс + Тералів',    # map to combined
-    'Кальцемін': 'Кальцемін',
-    'Бепантен Сенсідерм-4': 'Бепантен Сенсідерм-4',
-    # DD brands
-    'Елевіт': 'Елевіт',
-    'Супрадин-13': 'Супрадин-13',
-    'Супрадин-10': 'Супрадин-10',
-    'Бепантен Сенсідерм-4': 'Бепантен Сенсідерм-4',
-    'Бепантен Сенсідерм-2': 'Бепантен Сенсідерм-2',
-    'Бепантен Плюс': 'Бепантен Плюс',
-}
-
-# Service prices (from LA_Price sheet in template)
-SERVICE_PRICES = {
-    'Бепантен': 800.0,
-    'Антифлу': 300.0,
-    'Еріус': 600.0,
-    'Реліф': 800.0,
-    'Ренні': 600.0,
-    'Терафлекс + Тералів': 800.0,
-    'Бепантен Плюс': 300.0,
-    'Тералів': 300.0,
-    'Кальцемін': 300.0,
-    'Терафлекс': 300.0,
-    'Елевіт-3': 600.0,
-    'Супрадин-13': 800.0,
-    'Елевіт': 800.0,
-    'Супрадин-10': 800.0,
-    'Бепантен Сенсідерм-4': 800.0,
-    'Бепантен Сенсідерм-2': 800.0,
-}
-
-# ============================================================
 # SKU CLASSIFICATION CONFIG (loaded from CSV)
 # ============================================================
 
 from pathlib import Path
+import threading
 
 SKU_CLASSIFICATION_FILE = Path(__file__).resolve().parent / 'sku_classification.csv'
+SKU_CLASSIFICATION_LOCK_FILE = Path(__file__).resolve().parent / 'sku_classification.lock'
 
 _sku_classification_cache = None
 _sku_to_category = None
 _sku_to_brand = None
+_sku_classification_lock = threading.Lock()
 
 
 def load_sku_classification():
@@ -243,24 +185,80 @@ def save_sku_classification(sku_name, brand, category, active=True):
         new_row['SKU_NORMALIZED'] = normalized
         _sku_classification_cache = pd.concat([_sku_classification_cache, pd.DataFrame([new_row])], ignore_index=True)
 
-    # Rebuild lookup dictionaries (only active SKUs)
-    active_df = _sku_classification_cache[_sku_classification_cache['active']]
-    _sku_to_category = dict(zip(active_df['SKU_NORMALIZED'], active_df['CATEGORY']))
-    _sku_to_brand = dict(zip(active_df['SKU_NORMALIZED'], active_df['BRAND']))
+    return _save_and_update()
 
-    # Save to CSV with quoting for consistency
-    try:
-        # Save without the normalized column
-        save_df = _sku_classification_cache[['SKU_UA', 'BRAND', 'CATEGORY', 'active']].copy()
-        save_df.to_csv(SKU_CLASSIFICATION_FILE, index=False, encoding='utf-8', quoting=csv.QUOTE_ALL)
-        return True
-    except Exception as e:
-        print(f"Error saving SKU classification: {e}")
-        return False
+
+def _save_classification_cache():
+    """Thread-safe save of classification cache to CSV."""
+    with _sku_classification_lock:
+        # Use lock file for cross-process safety
+        lock_acquired = False
+        try:
+            # Try to create lock file (atomic operation)
+            SKU_CLASSIFICATION_LOCK_FILE.touch(exist_ok=False)
+            lock_acquired = True
+
+            save_df = _sku_classification_cache[['SKU_UA', 'BRAND', 'CATEGORY', 'active']].copy()
+            save_df.to_csv(SKU_CLASSIFICATION_FILE, index=False, encoding='utf-8', quoting=csv.QUOTE_ALL)
+            return True
+        except FileExistsError:
+            # Lock file exists, another process is writing
+            import time
+            time.sleep(0.1)
+            return _save_classification_cache()  # Retry
+        except Exception as e:
+            print(f"Error saving SKU classification: {e}")
+            return False
+        finally:
+            if lock_acquired and SKU_CLASSIFICATION_LOCK_FILE.exists():
+                try:
+                    SKU_CLASSIFICATION_LOCK_FILE.unlink()
+                except Exception:
+                    pass
+
+
+# Save to CSV with quoting for consistency (thread-safe)
+def _save_and_update():
+    _update_lookups()
+    return _save_classification_cache()
+
+
+def save_sku_classification(sku_name, brand, category, active=True):
+    """Add or update a SKU classification in the CSV file (thread-safe)."""
+    import pandas as pd
+    import csv
+
+    global _sku_classification_cache, _sku_to_category, _sku_to_brand
+
+    load_sku_classification()  # Ensure cache is loaded
+
+    normalized = str(sku_name).strip().casefold()
+    new_row = {
+        'SKU_UA': str(sku_name).strip(),
+        'BRAND': str(brand).strip(),
+        'CATEGORY': str(category).strip(),
+        'active': bool(active)
+    }
+
+    # Update cache
+    if normalized in _sku_to_category:
+        # Update existing
+        idx = _sku_classification_cache[_sku_classification_cache['SKU_NORMALIZED'] == normalized].index
+        if len(idx) > 0:
+            _sku_classification_cache.loc[idx[0], 'SKU_UA'] = new_row['SKU_UA']
+            _sku_classification_cache.loc[idx[0], 'BRAND'] = new_row['BRAND']
+            _sku_classification_cache.loc[idx[0], 'CATEGORY'] = new_row['CATEGORY']
+            _sku_classification_cache.loc[idx[0], 'active'] = new_row['active']
+    else:
+        # Add new
+        new_row['SKU_NORMALIZED'] = normalized
+        _sku_classification_cache = pd.concat([_sku_classification_cache, pd.DataFrame([new_row])], ignore_index=True)
+
+    return _save_and_update()
 
 
 def set_sku_active(sku_name, active=True):
-    """Set the active status of a SKU."""
+    """Set the active status of a SKU (thread-safe)."""
     import pandas as pd
     import csv
 
@@ -277,19 +275,7 @@ def set_sku_active(sku_name, active=True):
 
     _sku_classification_cache.loc[idx[0], 'active'] = bool(active)
 
-    # Rebuild lookup dictionaries (only active SKUs)
-    active_df = _sku_classification_cache[_sku_classification_cache['active']]
-    _sku_to_category = dict(zip(active_df['SKU_NORMALIZED'], active_df['CATEGORY']))
-    _sku_to_brand = dict(zip(active_df['SKU_NORMALIZED'], active_df['BRAND']))
-
-    # Save to CSV
-    try:
-        save_df = _sku_classification_cache[['SKU_UA', 'BRAND', 'CATEGORY', 'active']].copy()
-        save_df.to_csv(SKU_CLASSIFICATION_FILE, index=False, encoding='utf-8', quoting=csv.QUOTE_ALL)
-        return True
-    except Exception as e:
-        print(f"Error updating SKU active status: {e}")
-        return False
+    return _save_and_update()
 
 
 def get_all_skus_with_status():
@@ -1515,10 +1501,10 @@ def generate_excel_report(
         period_str = period_start
         period_end_ukrainian = period_end
 
-    # Contractor details
-    contract_no = '260326'
-    contract_date = '01 березня 2026 року'
-    executor_name = 'ПрАТ «Аптеки Запоріжжя»'
+    # Contractor details (from config, can be overridden by requisites file)
+    contract_no = DEFAULT_CONTRACT_NO
+    contract_date = DEFAULT_CONTRACT_DATE
+    executor_name = DEFAULT_EXECUTOR_NAME
 
     if df_req is not None and not df_req.empty:
         matched_row = None

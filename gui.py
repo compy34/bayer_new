@@ -19,7 +19,7 @@ from convertor import (
     get_tma_auth_amount,
     set_tma_auth_amount,
 )
-from Data.Controller import get_mhl_data, get_pharmacy_data, load_requisites_file, get_tma_offtake_data
+from Data.Controller import get_mhl_data, get_pharmacy_data, load_requisites_file, get_tma_offtake_data, DataLoadError
 
 
 # ============================================================
@@ -440,18 +440,27 @@ class ReportApp:
             offtake_error = None
             try:
                 data = get_pharmacy_data(*period, chain_name=selected_pharmacy if selected_pharmacy else None)
-            except (OSError, TypeError, ValueError) as load_error:
+            except DataLoadError as load_error:
                 data_error = load_error
+            except Exception as load_error:
+                data_error = DataLoadError(f'Несподівана помилка завантаження звіту: {load_error}')
+                data_error.__cause__ = load_error
             try:
                 # Load MHL data filtered by selected network (chain_name)
                 mhl_data = get_mhl_data(*period, chain_name=selected_pharmacy if selected_pharmacy else None)
-            except (OSError, TypeError, ValueError) as load_error:
+            except DataLoadError as load_error:
                 mhl_error = load_error
+            except Exception as load_error:
+                mhl_error = DataLoadError(f'Несподівана помилка завантаження MHL: {load_error}')
+                mhl_error.__cause__ = load_error
             try:
                 # Load TMA offtake data (sold quantities)
                 tma_offtake_data = get_tma_offtake_data(*period, chain_name=selected_pharmacy if selected_pharmacy else None)
-            except (OSError, TypeError, ValueError) as load_error:
+            except DataLoadError as load_error:
                 offtake_error = load_error
+            except Exception as load_error:
+                offtake_error = DataLoadError(f'Несподівана помилка завантаження TMA offtake: {load_error}')
+                offtake_error.__cause__ = load_error
             self.root.after(
                 0,
                 lambda: self._data_loaded(
@@ -660,6 +669,19 @@ class ReportApp:
             messagebox.showwarning('Попередження', str(error))
             return
 
+        # Validate TMA authorization amounts
+        pharmacy = self.pharmacy_name_var.get().strip()
+        if pharmacy:
+            lik_auth = get_tma_auth_amount(pharmacy, is_lic=True)
+            dd_auth = get_tma_auth_amount(pharmacy, is_lic=False)
+            if lik_auth == 0.0 and dd_auth == 0.0:
+                if not messagebox.askyesno(
+                    'Увага: авторизація не задана',
+                    f'Для мережі "{pharmacy}" не встановлено суми ТМА авторизації (ЛІК={lik_auth:.2f}, ДД={dd_auth:.2f}).\n'
+                    'Звіт згенерується з нульовою авторизацією. Продовжити?'
+                ):
+                    return
+
         # Build filename: (network_name)_ЗВІТ+АКТ.xlsx
         network_name = self.pharmacy_name_var.get().strip()
         if not network_name:
@@ -690,8 +712,14 @@ class ReportApp:
                 full_mhl_df=self.df_mhl,  # Full MHL data for DRUG_ID -> SKU mapping
                 offtake_df=self.df_tma_offtake,  # Pass TMA offtake data for sold quantities
             )
-        except (OSError, ValueError, KeyError) as error:
+        except DataLoadError as error:
+            messagebox.showerror('Помилка даних', str(error))
+            return
+        except (ValueError, KeyError) as error:
             messagebox.showerror('Помилка', str(error))
+            return
+        except Exception as error:
+            messagebox.showerror('Несподівана помилка', f'{type(error).__name__}: {error}')
             return
 
         self.status_var.set(f'Звіт збережено: {filename}')

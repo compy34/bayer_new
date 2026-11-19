@@ -2,7 +2,28 @@ import pyodbc
 import pandas as pd
 from pathlib import Path
 
+from config import DB_CONNECTION_STRING
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+class DataLoadError(Exception):
+    """Exception raised when data loading fails."""
+    pass
+
+
+def _get_connection():
+    """Create and return a database connection."""
+    return pyodbc.connect(DB_CONNECTION_STRING)
+
+
+def _apply_chain_filter(query: str, params: list, chain_name: str, column: str = 't.CHAIN_NAME') -> tuple:
+    """Apply chain filter to query if chain_name is provided."""
+    if chain_name and chain_name.strip() and chain_name.strip() != 'Усі аптеки':
+        clean_chain = chain_name.strip()
+        query += f" AND LTRIM(RTRIM(LOWER({column}))) = LOWER(?)"
+        params.append(clean_chain)
+    return query, params
 
 
 def get_pharmacy_data(period_start, period_end, chain_name=None):
@@ -12,16 +33,16 @@ def get_pharmacy_data(period_start, period_end, chain_name=None):
         period_start: Start date in YYYY-MM-DD format
         period_end: End date in YYYY-MM-DD format
         chain_name: Optional pharmacy chain/network name to filter by
-    """
-    try:
-        conn_str = (
-            r'DRIVER={SQL Server Native Client 11.0};'
-            r'SERVER=BYDE276YZ8D.bayer.cnb\I0940,58321;'
-            r'DATABASE=BAYER_CH_UA;'
-            r'Trusted_Connection=yes;'
-        )
 
-        connection = pyodbc.connect(conn_str)
+    Returns:
+        DataFrame with columns: CHAIN_NAME, PHARMACY_NAME, BRAND, MERCH, Price
+
+    Raises:
+        DataLoadError: If database query fails
+    """
+    connection = None
+    try:
+        connection = _get_connection()
 
         query = """
             SELECT
@@ -36,33 +57,16 @@ def get_pharmacy_data(period_start, period_end, chain_name=None):
         """
 
         params = [period_start, period_start, period_end, period_end]
-
-        # Add chain filter if provided - use TRIM and case-insensitive comparison
-        if chain_name and chain_name.strip() and chain_name.strip() != 'Усі аптеки':
-            clean_chain = chain_name.strip()
-            query += " AND LTRIM(RTRIM(LOWER(t.CHAIN_NAME))) = LOWER(?)"
-            params.append(clean_chain)
-
-        # DEBUG: Log query and params
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.debug(f"Pharmacy Query: {query}")
-        logger.debug(f"Pharmacy Params: {params}")
+        query, params = _apply_chain_filter(query, params, chain_name)
 
         df = pd.read_sql(query, connection, params=params)
-
-        logger.debug(f"Pharmacy Result: {len(df)} rows")
-        if not df.empty:
-            logger.debug(f"Pharmacy CHAIN_NAMEs: {df['CHAIN_NAME'].unique()[:10]}")
-
         return df
 
     except pyodbc.Error as e:
-        print(f'Помилка MS SQL Server: {e}')
-        return None
+        raise DataLoadError(f'Помилка завантаження даних аптек (Merch): {e}') from e
 
     finally:
-        if 'connection' in locals():
+        if connection is not None:
             connection.close()
 
 
@@ -72,19 +76,19 @@ def get_mhl_data(period_start, period_end, chain_name=None):
     Args:
         period_start: Start date in YYYY-MM-DD format
         period_end: End date in YYYY-MM-DD format
-        chain_name: Optional pharmacy chain/network name to filter by (e.g., from UI selection)
+        chain_name: Optional pharmacy chain/network name to filter by
+
+    Returns:
+        DataFrame with columns: DATE, CHAIN_ID, CHAIN_NAME, DRUG_ID, SKU_UA, BRAND,
+        PENETRATION, PRICE_CP, SUPPLY, PENETRATION_TARGET
+
+    Raises:
+        DataLoadError: If database query fails
     """
     connection = None
     try:
-        conn_str = (
-            r'DRIVER={SQL Server Native Client 11.0};'
-            r'SERVER=BYDE276YZ8D.bayer.cnb\I0940,58321;'
-            r'DATABASE=BAYER_CH_UA;'
-            r'Trusted_Connection=yes;'
-        )
-        connection = pyodbc.connect(conn_str)
+        connection = _get_connection()
 
-        # Base query with robust chain filtering (TRIM + case-insensitive)
         query = """
             SELECT
                 main.[DATE],
@@ -112,33 +116,57 @@ def get_mhl_data(period_start, period_end, chain_name=None):
         """
 
         params = [period_start, period_end]
-
-        # Add chain filter if provided - use TRIM and case-insensitive comparison
-        if chain_name and chain_name.strip() and chain_name.strip() != 'Усі аптеки':
-            clean_chain = chain_name.strip()
-            # Use TRIM on both sides and case-insensitive comparison for robust matching
-            query += " AND LTRIM(RTRIM(LOWER(main.[CHAIN_NAME]))) = LOWER(?)"
-            params.append(clean_chain)
-
-        # DEBUG: Log query and params (remove in production)
-        import logging
-        logging.basicConfig(level=logging.DEBUG)
-        logger = logging.getLogger(__name__)
-        logger.debug(f"MHL Query: {query}")
-        logger.debug(f"MHL Params: {params}")
+        query, params = _apply_chain_filter(query, params, chain_name, 'main.[CHAIN_NAME]')
 
         df = pd.read_sql(query, connection, params=params)
-
-        # DEBUG: Log result info
-        logger.debug(f"MHL Result: {len(df)} rows, columns: {list(df.columns)}")
-        if not df.empty:
-            logger.debug(f"MHL Sample CHAIN_NAMEs: {df['CHAIN_NAME'].unique()[:10]}")
-            logger.debug(f"MHL PENETRATION nulls: {df['PENETRATION'].isna().sum()}")
-            logger.debug(f"MHL PENETRATION_TARGET nulls: {df['PENETRATION_TARGET'].isna().sum()}")
-
         return df
-    except pyodbc.Error as error:
-        raise OSError(f'Помилка завантаження MHL з MS SQL Server: {error}') from error
+
+    except pyodbc.Error as e:
+        raise DataLoadError(f'Помилка завантаження MHL даних: {e}') from e
+
+    finally:
+        if connection is not None:
+            connection.close()
+
+
+def get_tma_offtake_data(period_start, period_end, chain_name=None):
+    """Load TMA offtake (sold quantity) data from dbo.supply_KA_TMA.
+
+    Args:
+        period_start: Start date in YYYY-MM-DD format
+        period_end: End date in YYYY-MM-DD format
+        chain_name: Optional pharmacy chain/network name to filter by
+
+    Returns:
+        DataFrame with columns: DATE, CHAIN_ID, CHAIN_NAME, DRUG_ID, OFFTAKE
+
+    Raises:
+        DataLoadError: If database query fails
+    """
+    connection = None
+    try:
+        connection = _get_connection()
+
+        query = """
+            SELECT
+                t.[DATE],
+                t.[CHAIN_ID],
+                t.[CHAIN_NAME],
+                t.[DRUG_ID],
+                t.[OFFTAKE]
+            FROM [dbo].[supply_KA_TMA] AS t
+            WHERE t.[DATE] >= ? AND t.[DATE] <= ?
+        """
+
+        params = [period_start, period_end]
+        query, params = _apply_chain_filter(query, params, chain_name, 't.[CHAIN_NAME]')
+
+        df = pd.read_sql(query, connection, params=params)
+        return df
+
+    except pyodbc.Error as e:
+        raise DataLoadError(f'Помилка завантаження TMA offtake даних: {e}') from e
+
     finally:
         if connection is not None:
             connection.close()
@@ -161,64 +189,3 @@ def load_requisites_file(filename):
     # Очищуємо заголовки колонок від зайвих пробілів
     df_req.columns = df_req.columns.astype(str).str.strip()
     return df_req.fillna('')
-
-
-def get_tma_offtake_data(period_start, period_end, chain_name=None):
-    """Load TMA offtake (sold quantity) data from dbo.supply_KA_TMA.
-
-    Args:
-        period_start: Start date in YYYY-MM-DD format
-        period_end: End date in YYYY-MM-DD format
-        chain_name: Optional pharmacy chain/network name to filter by
-    Returns:
-        DataFrame with columns: DATE, CHAIN_ID, CHAIN_NAME, DRUG_ID, OFFTAKE
-    """
-    connection = None
-    try:
-        conn_str = (
-            r'DRIVER={SQL Server Native Client 11.0};'
-            r'SERVER=BYDE276YZ8D.bayer.cnb\I0940,58321;'
-            r'DATABASE=BAYER_CH_UA;'
-            r'Trusted_Connection=yes;'
-        )
-        connection = pyodbc.connect(conn_str)
-
-        query = """
-            SELECT
-                t.[DATE],
-                t.[CHAIN_ID],
-                t.[CHAIN_NAME],
-                t.[DRUG_ID],
-                t.[OFFTAKE]
-            FROM [dbo].[supply_KA_TMA] AS t
-            WHERE t.[DATE] >= ? AND t.[DATE] <= ?
-        """
-
-        params = [period_start, period_end]
-
-        # Add chain filter if provided
-        if chain_name and chain_name.strip() and chain_name.strip() != 'Усі аптеки':
-            clean_chain = chain_name.strip()
-            query += " AND LTRIM(RTRIM(LOWER(t.[CHAIN_NAME]))) = LOWER(?)"
-            params.append(clean_chain)
-
-        # DEBUG
-        import logging
-        logging.basicConfig(level=logging.DEBUG)
-        logger = logging.getLogger(__name__)
-        logger.debug(f"TMA Offtake Query: {query}")
-        logger.debug(f"TMA Offtake Params: {params}")
-
-        df = pd.read_sql(query, connection, params=params)
-
-        logger.debug(f"TMA Offtake Result: {len(df)} rows")
-        if not df.empty:
-            logger.debug(f"TMA Offtake CHAIN_NAMEs: {df['CHAIN_NAME'].unique()[:10]}")
-            logger.debug(f"TMA Offtake DRUG_IDs: {df['DRUG_ID'].nunique()}")
-
-        return df
-    except pyodbc.Error as error:
-        raise OSError(f'Помилка завантаження TMA offtake з MS SQL Server: {error}') from error
-    finally:
-        if connection is not None:
-            connection.close()

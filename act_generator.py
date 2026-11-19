@@ -2,6 +2,12 @@ from datetime import datetime, timedelta
 import pandas as pd
 from num2words import num2words
 from openpyxl.styles import Alignment, Border, Font, Side
+from config import (
+    DEFAULT_CONTRACT_NO,
+    DEFAULT_CONTRACT_DATE,
+    DEFAULT_TMA_CONTRACT_DATE,
+    DEFAULT_EXECUTOR_NAME,
+)
 
 # Column name variants for client (user may have different column names in requisites file)
 CLIENT_COL_VARIANTS = [
@@ -19,9 +25,9 @@ def generate_act_sheet(
         period_end,
         selected_pharmacy='Усі аптеки',
         act_number='1',
-        contract_no='260326',
-        contract_date='01 березня 2026 року',
-        executor_name='ПрАТ «Аптеки Запоріжжя»',
+        contract_no=DEFAULT_CONTRACT_NO,
+        contract_date=DEFAULT_CONTRACT_DATE,
+        executor_name=DEFAULT_EXECUTOR_NAME,
         is_lic=True
 ):
     thin_border = Border(
@@ -332,9 +338,9 @@ def generate_tma_act_sheet(
         period_end,
         selected_pharmacy='Усі аптеки',
         act_number='1',
-        contract_no='260326',
-        contract_date='01 березня 2026 року',
-        executor_name='ПрАТ «Аптеки Запоріжжя»',
+        contract_no=DEFAULT_CONTRACT_NO,
+        contract_date=DEFAULT_TMA_CONTRACT_DATE,
+        executor_name=DEFAULT_EXECUTOR_NAME,
         is_lic=True
 ):
     """Generate АКТ_ТМА sheet for ЛИК or ДД category."""
