@@ -451,7 +451,7 @@ class SettingsDialog(tk.Toplevel):
             parent,
             text='Значення за замовчуванням (використовуються, якщо в файлі реквізитів немає даних).',
             font=FONT_SMALL, bg=BG_COLOR, fg=TEXT_MUTED, wraplength=600, justify='left'
-        ).pack(anchor='w', pady=(0, PAD_Y))
+        ).grid(row=0, column=0, columnspan=2, sticky='w', padx=PAD_X, pady=(0, PAD_Y))
 
         fields = [
             ('DEFAULT_CONTRACT_NO', 'Номер договору', DEFAULT_CONTRACT_NO),
@@ -463,20 +463,21 @@ class SettingsDialog(tk.Toplevel):
 
         self.contract_entries = {}
         for i, (key, label, default) in enumerate(fields):
+            row = i + 1  # row 0 зайнято описовим label
             tk.Label(parent, text=label, font=FONT_BODY, bg=BG_COLOR, fg=TEXT_MAIN).grid(
-                row=i, column=0, sticky='w', padx=PAD_X, pady=(PAD_Y, 4)
+                row=row, column=0, sticky='w', padx=PAD_X, pady=(PAD_Y, 4)
             )
             entry = tk.Entry(parent, font=FONT_BODY, relief='solid', bd=1,
                             highlightthickness=1, highlightcolor=BORDER_FOCUS, highlightbackground=BORDER, width=50)
             entry.insert(0, default)
-            entry.grid(row=i, column=0, sticky='ew', padx=PAD_X, pady=(0, 4))
+            entry.grid(row=row, column=0, sticky='ew', padx=PAD_X, pady=(0, 4))
             self.contract_entries[key] = entry
 
         parent.grid_columnconfigure(0, weight=1)
 
         # Save button
         btn_frame = tk.Frame(parent, bg=BG_COLOR)
-        btn_frame.grid(row=len(fields), column=0, sticky='ew', padx=PAD_X, pady=PAD_Y)
+        btn_frame.grid(row=len(fields) + 1, column=0, sticky='ew', padx=PAD_X, pady=PAD_Y)
         ModernButton(btn_frame, text='💾 Зберегти як нові дефолти', style='success',
                     command=self._save_contract_defaults).pack(side='right')
 
