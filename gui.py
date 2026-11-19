@@ -15,6 +15,7 @@ from config import (
     LIK_BRANDS_TEMPLATE,
     DD_BRANDS_TEMPLATE,
     MHL_REWARD_MULTIPLIER,
+    TMA_ACTION_PERCENT_FILE,
     MHL_ACTION_PERCENT_FILE,
     LA_PRICE_FILE,
 )
@@ -703,7 +704,7 @@ class SettingsDialog(tk.Toplevel):
             self._refresh_targets_table()
 
     def _build_tma_settings_tab(self, parent):
-        """TMA Settings - action percent file path, LA_Price file path, and MHL reward multiplier."""
+        """TMA Settings - TMA action percent file, MHL action percent file, LA_Price file path, and MHL reward multiplier."""
         tk.Label(
             parent,
             text='Налаштування для аркушів "під час акції" (ТМА).',
@@ -725,6 +726,47 @@ class SettingsDialog(tk.Toplevel):
 
         ModernButton(multiplier_frame, text='Зберегти', style='primary',
                     command=self._save_mhl_reward_multiplier).grid(row=0, column=3, sticky='e', padx=(10, 0))
+
+        # --- TMA Action Percent File (TMA.xlsx) ---
+        tk.Label(parent, text='Файл відсотків акції (TMA):', font=FONT_SUBTITLE, bg=BG_COLOR, fg=TEXT_MAIN).pack(anchor='w', pady=(PAD_Y, 4))
+        tk.Label(parent, text='Перший аркуш, колонки: SKU_UKR та %', font=FONT_SMALL, bg=BG_COLOR, fg=TEXT_MUTED).pack(anchor='w', pady=(0, PAD_Y))
+
+        tma_file_frame = tk.Frame(parent, bg=BG_COLOR)
+        tma_file_frame.pack(fill='x', pady=(0, PAD_Y))
+        tma_file_frame.columnconfigure(1, weight=1)
+
+        tk.Label(tma_file_frame, text='Файл:', font=FONT_BODY, bg=BG_COLOR, fg=TEXT_MAIN).grid(row=0, column=0, sticky='w', padx=(0, 10))
+        self.tma_action_file_var = tk.StringVar(value=TMA_ACTION_PERCENT_FILE)
+        tma_file_entry = tk.Entry(tma_file_frame, textvariable=self.tma_action_file_var,
+                                   font=FONT_BODY, relief='solid', bd=1,
+                                   highlightthickness=1, highlightcolor=BORDER_FOCUS, highlightbackground=BORDER)
+        tma_file_entry.grid(row=0, column=1, sticky='ew', padx=(0, 10))
+        ModernButton(tma_file_frame, text='Обрати...', style='outline',
+                    command=self._select_tma_action_file).grid(row=0, column=2, sticky='e')
+
+        tma_btn_frame = tk.Frame(parent, bg=BG_COLOR)
+        tma_btn_frame.pack(fill='x', pady=(0, PAD_Y))
+        ModernButton(tma_btn_frame, text='🔄 Перезавантажити файл відсотків', style='primary',
+                    command=self._reload_tma_action_file).pack(side='left')
+        ModernButton(tma_btn_frame, text='📋 Показати завантажені відсотки', style='secondary',
+                    command=self._show_tma_action_percents).pack(side='left', padx=(10, 0))
+
+        # TMA Preview area
+        tma_preview_frame = tk.Frame(parent, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
+        tma_preview_frame.pack(fill='both', expand=True)
+        tma_preview_frame.grid_rowconfigure(0, weight=1)
+        tma_preview_frame.grid_columnconfigure(0, weight=1)
+
+        self.tma_action_preview = tk.Text(tma_preview_frame, font=FONT_MONO, bg=SURFACE, fg=TEXT_MAIN,
+                                           wrap='none', height=10, relief='flat', bd=0)
+        self.tma_action_preview.grid(row=0, column=0, sticky='nsew', padx=8, pady=8)
+        vsb = ttk.Scrollbar(tma_preview_frame, orient='vertical', command=self.tma_action_preview.yview)
+        hsb = ttk.Scrollbar(tma_preview_frame, orient='horizontal', command=self.tma_action_preview.xview)
+        self.tma_action_preview.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+        vsb.grid(row=0, column=1, sticky='ns')
+        hsb.grid(row=1, column=0, sticky='ew')
+
+        self._refresh_tma_action_preview()
 
         # --- MHL Action Percent File ---
         tk.Label(parent, text='Файл відсотків акції (MHL):', font=FONT_SUBTITLE, bg=BG_COLOR, fg=TEXT_MAIN).pack(anchor='w', pady=(PAD_Y, 4))
@@ -872,6 +914,64 @@ class SettingsDialog(tk.Toplevel):
         self.mhl_action_preview.insert('end', f'Завантажено SKU: {len(percents)}\n\n')
         for sku, pct in sorted(percents.items()):
             self.mhl_action_preview.insert('end', f'{sku}: {pct:.2f}%\n')
+
+    # --- TMA Action Percent Methods ---
+    def _select_tma_action_file(self):
+        filename = filedialog.askopenfilename(
+            title='Виберіть файл відсотків акції (TMA)',
+            initialdir=str(Path.cwd()),
+            filetypes=[('Excel', '*.xlsx *.xls'), ('Усі файли', '*.*')]
+        )
+        if filename:
+            self.tma_action_file_var.set(filename)
+
+    def _reload_tma_action_file(self):
+        from convertor import set_tma_action_percent_file
+        filepath = self.tma_action_file_var.get().strip()
+        if filepath:
+            set_tma_action_percent_file(filepath)
+            self.app.status_var.set(f'TMA відсотки перезавантажено: {Path(filepath).name}')
+            self._refresh_tma_action_preview()
+        else:
+            messagebox.showwarning('Помилка', 'Спочатку оберіть файл', parent=self)
+
+    def _show_tma_action_percents(self):
+        from convertor import load_tma_action_percents
+        filepath = self.tma_action_file_var.get().strip()
+        percents = load_tma_action_percents(filepath) if filepath else {}
+
+        win = tk.Toplevel(self)
+        win.title('TMA Відсотки акції')
+        win.geometry('400x500')
+        win.configure(bg=BG_COLOR)
+
+        text = tk.Text(win, font=FONT_MONO, bg=SURFACE, fg=TEXT_MAIN, wrap='none')
+        text.pack(fill='both', expand=True, padx=PAD_X, pady=PAD_X)
+
+        if not percents:
+            text.insert('end', f'Файл не знайдено або порожній: {filepath}')
+        else:
+            text.insert('end', f'Файл: {filepath}\n')
+            text.insert('end', f'Завантажено SKU: {len(percents)}\n\n')
+            for sku, pct in sorted(percents.items()):
+                text.insert('end', f'{sku}: {pct:.2f}%\n')
+
+        tk.Label(win, text=f'Всього SKU: {len(percents)}', font=FONT_SMALL, bg=BG_COLOR, fg=TEXT_MUTED).pack(anchor='w', padx=PAD_X, pady=(0, PAD_X))
+
+    def _refresh_tma_action_preview(self):
+        from convertor import load_tma_action_percents
+        filepath = self.tma_action_file_var.get().strip()
+        percents = load_tma_action_percents(filepath) if filepath else {}
+
+        self.tma_action_preview.delete('1.0', 'end')
+        if not percents:
+            self.tma_action_preview.insert('end', f'Файл не знайдено або порожній: {filepath}')
+            return
+
+        self.tma_action_preview.insert('end', f'Файл: {filepath}\n')
+        self.tma_action_preview.insert('end', f'Завантажено SKU: {len(percents)}\n\n')
+        for sku, pct in sorted(percents.items()):
+            self.tma_action_preview.insert('end', f'{sku}: {pct:.2f}%\n')
 
     def _save_mhl_reward_multiplier(self):
         """Save MHL reward multiplier to config."""

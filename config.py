@@ -78,7 +78,11 @@ DD_BRANDS_TEMPLATE = [
 # 0.1 = 10%
 MHL_REWARD_MULTIPLIER = 0.1
 
-# MHL action percentage file path (for "під час акції" sheets)
+# TMA action percentage file path (for "під час акції" sheets - TMA)
+# Default file: TMA.xlsx, sheet "Sheet1" or first sheet, columns: SKU_UKR -> %
+TMA_ACTION_PERCENT_FILE = "TMA.xlsx"
+
+# MHL action percentage file path (for MHL penetration targets)
 # Default file: MHL_Q3'2026.xlsx, sheet "для договору", columns: SKU_UKR -> Q3'26, %
 MHL_ACTION_PERCENT_FILE = "MHL_Q3'2026.xlsx"
 

@@ -13,6 +13,7 @@ from config import (
     DEFAULT_TMA_CONTRACT_DATE,
     DEFAULT_EXECUTOR_NAME,
     MHL_REWARD_MULTIPLIER,
+    TMA_ACTION_PERCENT_FILE,
     MHL_ACTION_PERCENT_FILE,
     LA_PRICE_FILE,
 )
@@ -500,6 +501,165 @@ def set_mhl_action_percent_file(filepath):
     MHL_ACTION_PERCENT_FILE = Path(filepath)
     _mhl_action_percent_cache = None  # Force reload
     return load_mhl_action_percents()
+
+
+# ============================================================
+# TMA ACTION PERCENTAGE LOADER (for "під час акції" sheets - TMA)
+# ============================================================
+
+TMA_ACTION_PERCENT_FILE = Path(__file__).resolve().parent / TMA_ACTION_PERCENT_FILE
+_tma_action_percent_cache = None
+_tma_action_percent_lock = threading.Lock()
+
+
+def load_tma_action_percents(filepath=None):
+    """Load TMA action percentages from Excel file.
+
+    Expected file: TMA.xlsx (configurable)
+    Sheet: first sheet
+    Columns: Назва мережі, Назва СКЮ, Початок промо, Кінець промо, знижка
+
+    Returns list of dicts with keys: chain, sku, promo_start, promo_end, discount_pct
+    If file doesn't exist, returns empty list (will result in 0% for all SKUs).
+    """
+    global _tma_action_percent_cache
+
+    with _tma_action_percent_lock:
+        if _tma_action_percent_cache is not None:
+            return _tma_action_percent_cache
+
+        file_to_load = Path(filepath) if filepath else TMA_ACTION_PERCENT_FILE
+
+        if not file_to_load.exists():
+            _tma_action_percent_cache = []
+            return _tma_action_percent_cache
+
+        try:
+            df = pd.read_excel(file_to_load, sheet_name=0, dtype=str)  # first sheet
+            # Normalize column names
+            df.columns = df.columns.astype(str).str.strip()
+
+            # Map expected columns (Ukrainian names)
+            col_map = {}
+            for col in df.columns:
+                col_lower = col.strip().lower()
+                if 'назва мереж' in col_lower or 'chain' in col_lower:
+                    col_map['chain'] = col
+                elif 'назва ску' in col_lower or 'sku' in col_lower:
+                    col_map['sku'] = col
+                elif 'початок промо' in col_lower or 'promo start' in col_lower or 'start' in col_lower:
+                    col_map['promo_start'] = col
+                elif 'кінець промо' in col_lower or 'promo end' in col_lower or 'end' in col_lower:
+                    col_map['promo_end'] = col
+                elif 'знижк' in col_lower or 'discount' in col_lower or '%' in col_lower:
+                    col_map['discount'] = col
+
+            required = ['chain', 'sku', 'promo_start', 'promo_end', 'discount']
+            if not all(k in col_map for k in required):
+                print(f"Warning: Required columns not found in TMA file. Found: {col_map}, Expected: {required}")
+                _tma_action_percent_cache = []
+                return _tma_action_percent_cache
+
+            # Parse rows
+            records = []
+            for _, row in df.iterrows():
+                chain = str(row.get(col_map['chain'], '')).strip()
+                sku = str(row.get(col_map['sku'], '')).strip()
+                promo_start = str(row.get(col_map['promo_start'], '')).strip()
+                promo_end = str(row.get(col_map['promo_end'], '')).strip()
+                discount_str = str(row.get(col_map['discount'], '')).strip()
+
+                if not (chain and sku and discount_str):
+                    continue
+
+                try:
+                    pct_clean = discount_str.replace('%', '').replace(',', '.').strip()
+                    discount_pct = float(pct_clean)
+                    if discount_pct <= 1:
+                        discount_pct = discount_pct * 100
+
+                    # Parse dates (try multiple formats)
+                    start_date = _parse_date_flexible(promo_start)
+                    end_date = _parse_date_flexible(promo_end)
+
+                    records.append({
+                        'chain': chain.casefold(),
+                        'sku': sku.casefold(),
+                        'promo_start': start_date,
+                        'promo_end': end_date,
+                        'discount_pct': discount_pct
+                    })
+                except ValueError:
+                    continue
+
+            _tma_action_percent_cache = records
+            return _tma_action_percent_cache
+
+        except Exception as e:
+            print(f"Error loading TMA action percentages: {e}")
+            _tma_action_percent_cache = []
+            return _tma_action_percent_cache
+
+
+def _parse_date_flexible(date_str):
+    """Parse date from various formats: DD.MM.YYYY, YYYY-MM-DD, DD/MM/YYYY, etc."""
+    if not date_str:
+        return None
+    for fmt in ('%d.%m.%Y', '%Y-%m-%d', '%d/%m/%Y', '%d.%m.%y', '%Y/%m/%d'):
+        try:
+            return datetime.strptime(date_str.strip(), fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def get_tma_action_percent(sku_ukr, period_start=None, period_end=None, chain_name=None):
+    """Get TMA action percentage for a SKU, filtered by period and chain.
+
+    Args:
+        sku_ukr: SKU name
+        period_start: Report period start (date or 'YYYY-MM-DD' string)
+        period_end: Report period end (date or 'YYYY-MM-DD' string)
+        chain_name: Pharmacy chain name (will be normalized)
+
+    Returns:
+        Percentage as float (e.g., 10.0 for 10%), or 0.0 if not found / file missing.
+    """
+    load_tma_action_percents()
+    if not _tma_action_percent_cache:
+        return 0.0
+
+    normalized_sku = str(sku_ukr).strip().casefold()
+    normalized_chain = chain_normalizer.normalize_chain_name(chain_name).casefold() if chain_name else None
+
+    # Parse period dates
+    if isinstance(period_start, str):
+        period_start = _parse_date_flexible(period_start)
+    if isinstance(period_end, str):
+        period_end = _parse_date_flexible(period_end)
+
+    # Find matching record: same SKU, chain matches (or no chain filter), promo overlaps with period
+    for rec in _tma_action_percent_cache:
+        if rec['sku'] != normalized_sku:
+            continue
+        if normalized_chain and rec['chain'] != normalized_chain:
+            continue
+        # Check promo period overlaps with report period
+        if period_start and rec['promo_end'] and rec['promo_end'] < period_start:
+            continue
+        if period_end and rec['promo_start'] and rec['promo_start'] > period_end:
+            continue
+        return rec['discount_pct']
+
+    return 0.0
+
+
+def set_tma_action_percent_file(filepath):
+    """Update the TMA action percent file path and reload."""
+    global TMA_ACTION_PERCENT_FILE, _tma_action_percent_cache
+    TMA_ACTION_PERCENT_FILE = Path(filepath)
+    _tma_action_percent_cache = None  # Force reload
+    return load_tma_action_percents()
 
 
 # ============================================================
@@ -1479,8 +1639,8 @@ def fill_tma_worksheet(ws, template_brands, period_start, period_end, executor_n
         # Get PRICE_CP from MHL data (actual purchase price), fallback to base_price
         price_cp = mhl_price_map.get(sku_name.casefold(), base_price)
 
-        # Discount - use action percentage from MHL action percent file
-        discount_pct = get_mhl_action_percent(sku_name)
+        # Discount - use action percentage from TMA action percent file (TMA.xlsx)
+        discount_pct = get_tma_action_percent(sku_name, period_start, period_end, selected_pharmacy)
 
         # Quantity sold by executor - use offtake data if available
         sku_normalized = sku_name.casefold()
