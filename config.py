@@ -74,6 +74,10 @@ DD_BRANDS_TEMPLATE = [
     'Бепантен Сенсідерм-2',
 ]
 
+# MHL reward multiplier (percentage of service2_total)
+# 0.1 = 10%
+MHL_REWARD_MULTIPLIER = 0.1
+
 # Database connection
 DB_CONNECTION_STRING = (
     r'DRIVER={SQL Server Native Client 11.0};'

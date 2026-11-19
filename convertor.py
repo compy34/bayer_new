@@ -12,6 +12,7 @@ from config import (
     DEFAULT_CONTRACT_DATE,
     DEFAULT_TMA_CONTRACT_DATE,
     DEFAULT_EXECUTOR_NAME,
+    MHL_REWARD_MULTIPLIER,
 )
 from chain_normalizer import normalize_chain_name, find_matching_chain
 
@@ -855,7 +856,7 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
     for col in range(2, 6):
         ws.cell(mhl_reward_row, col).border = thin_border
 
-    reward_amount = round(service2_total * 0.1, 2)
+    reward_amount = round(service2_total * MHL_REWARD_MULTIPLIER, 2)
     reward_cell = ws.cell(mhl_reward_row, 6, reward_amount)
     reward_cell.font = header_font
     reward_cell.alignment = right

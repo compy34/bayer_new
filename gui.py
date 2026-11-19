@@ -14,6 +14,7 @@ from config import (
     DB_BRAND_TO_TEMPLATE,
     LIK_BRANDS_TEMPLATE,
     DD_BRANDS_TEMPLATE,
+    MHL_REWARD_MULTIPLIER,
 )
 from convertor import (
     build_report_dataframe,
@@ -444,6 +445,7 @@ class SettingsDialog(tk.Toplevel):
             ('DEFAULT_CONTRACT_DATE', 'Дата договору (напр. 01 березня 2026 року)', DEFAULT_CONTRACT_DATE),
             ('DEFAULT_TMA_CONTRACT_DATE', 'Дата договору для ТМА (напр. 27 лютого 2026 року)', DEFAULT_TMA_CONTRACT_DATE),
             ('DEFAULT_EXECUTOR_NAME', 'Виконавець', DEFAULT_EXECUTOR_NAME),
+            ('MHL_REWARD_MULTIPLIER', 'MHL відсоток винагороди (0.1 = 10%)', str(MHL_REWARD_MULTIPLIER)),
         ]
 
         self.contract_entries = {}
@@ -467,13 +469,14 @@ class SettingsDialog(tk.Toplevel):
 
     def _save_contract_defaults(self):
         """Note: This only affects current session. For persistent changes, edit config.py."""
-        from config import DEFAULT_CONTRACT_NO, DEFAULT_CONTRACT_DATE, DEFAULT_TMA_CONTRACT_DATE, DEFAULT_EXECUTOR_NAME
+        from config import DEFAULT_CONTRACT_NO, DEFAULT_CONTRACT_DATE, DEFAULT_TMA_CONTRACT_DATE, DEFAULT_EXECUTOR_NAME, MHL_REWARD_MULTIPLIER
         # Update runtime config
         import config as cfg
         cfg.DEFAULT_CONTRACT_NO = self.contract_entries['DEFAULT_CONTRACT_NO'].get()
         cfg.DEFAULT_CONTRACT_DATE = self.contract_entries['DEFAULT_CONTRACT_DATE'].get()
         cfg.DEFAULT_TMA_CONTRACT_DATE = self.contract_entries['DEFAULT_TMA_CONTRACT_DATE'].get()
         cfg.DEFAULT_EXECUTOR_NAME = self.contract_entries['DEFAULT_EXECUTOR_NAME'].get()
+        cfg.MHL_REWARD_MULTIPLIER = float(self.contract_entries['MHL_REWARD_MULTIPLIER'].get() or 0.1)
         messagebox.showinfo('Збережено', 'Зміни застосовано до поточної сесії.\nДля постійних змін відредагуйте config.py', parent=self)
 
     def _build_prices_tab(self, parent):
