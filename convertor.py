@@ -537,7 +537,7 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
     start_data_row = 11
 
     # Hide "Відповідальна особа" column (column 3)
-    ws.column_dimensions['C'].width = 0
+    ws.column_dimensions['C'].hidden = True
 
     for idx, row_data in enumerate(pivot_df.iterrows(), start=start_data_row):
         row_values = row_data[1]
@@ -714,8 +714,8 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
     # Write MHL data rows
     mhl_first_data_row = mhl_header_row + 1
 
-    # Hide "Бренд" column (column 3) - set width to 0
-    ws.column_dimensions['C'].width = 0
+    # Hide "Бренд" column (column 3)
+    ws.column_dimensions['C'].hidden = True
 
     for idx, mhl_row in enumerate(mhl_data_rows, start=mhl_first_data_row):
         ws.cell(idx, 1, idx - mhl_first_data_row + 1).font = normal_font
