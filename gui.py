@@ -5,6 +5,16 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 import pandas as pd
+from config import (
+    SERVICE_PRICES,
+    DEFAULT_CONTRACT_NO,
+    DEFAULT_CONTRACT_DATE,
+    DEFAULT_TMA_CONTRACT_DATE,
+    DEFAULT_EXECUTOR_NAME,
+    DB_BRAND_TO_TEMPLATE,
+    LIK_BRANDS_TEMPLATE,
+    DD_BRANDS_TEMPLATE,
+)
 from convertor import (
     build_report_dataframe,
     generate_excel_report,
@@ -23,29 +33,38 @@ from Data.Controller import get_mhl_data, get_pharmacy_data, load_requisites_fil
 
 
 # ============================================================
-# UI CONSTANTS — modern, calm color palette
+# UI CONSTANTS — clean, professional palette
 # ============================================================
-BG_COLOR = '#f5f5f5'
-CARD_BG = '#ffffff'
+BG_COLOR = '#fafafa'
+SURFACE = '#ffffff'
 PRIMARY = '#1a56a0'
 PRIMARY_HOVER = '#154380'
 PRIMARY_LIGHT = '#e8eef7'
-ACCENT = '#007b5e'
+SUCCESS = '#007b5e'
+SUCCESS_HOVER = '#00664d'
+WARNING = '#e67e22'
 DANGER = '#c0392b'
-TEXT_MAIN = '#212529'
-TEXT_MUTED = '#6c757d'
-BORDER = '#dee2e6'
-SHADOW = '#0000001a'
+TEXT_MAIN = '#1a1a2e'
+TEXT_SECONDARY = '#4a4a5a'
+TEXT_MUTED = '#888899'
+BORDER = '#e0e0e8'
+BORDER_FOCUS = '#1a56a0'
 
-FONT_TITLE = ('Segoe UI', 16, 'bold')
-FONT_SUBTITLE = ('Segoe UI', 11)
+FONT_TITLE = ('Segoe UI', 18, 'bold')
+FONT_SUBTITLE = ('Segoe UI', 11, 'bold')
 FONT_BODY = ('Segoe UI', 10)
+FONT_SMALL = ('Segoe UI', 9)
 FONT_MONO = ('Consolas', 9)
 FONT_BUTTON = ('Segoe UI', 10, 'bold')
+FONT_BUTTON_SMALL = ('Segoe UI', 9)
+
+PAD_X = 20
+PAD_Y = 16
+CARD_RADIUS = 8
 
 
 def _find_requisites_file():
-    """Auto-detect requisites file in project root. Prioritizes .xlsx files."""
+    """Auto-detect requisites file in project root."""
     root = Path(__file__).resolve().parent
     patterns = ['реквізити*', 'requisites*', 'реквизиты*']
     all_matches = []
@@ -56,22 +75,21 @@ def _find_requisites_file():
                 all_matches.append(m)
     if not all_matches:
         return None
-    # Priority: .xlsx > .xls > .csv
     ext_priority = {'.xlsx': 0, '.xls': 1, '.csv': 2}
     all_matches.sort(key=lambda p: ext_priority.get(p.suffix.lower(), 99))
     return all_matches[0]
 
 
 class ModernButton(tk.Button):
-    """Custom button with hover effects."""
+    """Clean button with hover effects."""
     def __init__(self, master, style='primary', **kwargs):
         self.style_type = style
         colors = {
             'primary': (PRIMARY, PRIMARY_HOVER, 'white'),
-            'secondary': ('#6c757d', '#5a6268', 'white'),
-            'success': (ACCENT, '#00664d', 'white'),
-            'danger': (DANGER, '#a02d22', 'white'),
-            'outline': ('white', PRIMARY_LIGHT, PRIMARY),
+            'secondary': (SURFACE, '#f0f0f5', TEXT_MAIN),
+            'success': (SUCCESS, SUCCESS_HOVER, 'white'),
+            'danger': (DANGER, '#a02d2b', 'white'),
+            'outline': (SURFACE, PRIMARY_LIGHT, PRIMARY),
         }
         bg, hover_bg, fg = colors.get(style, colors['primary'])
         super().__init__(
@@ -80,11 +98,11 @@ class ModernButton(tk.Button):
             fg=fg,
             activebackground=hover_bg,
             activeforeground=fg,
-            font=FONT_BUTTON,
+            font=FONT_BUTTON if 'height' not in kwargs else FONT_BUTTON_SMALL,
             relief='flat',
             bd=0,
-            padx=18,
-            pady=8,
+            padx=20,
+            pady=10,
             cursor='hand2',
             **kwargs
         )
@@ -95,43 +113,467 @@ class ModernButton(tk.Button):
 
 
 class Card(tk.Frame):
-    """Card container with subtle shadow."""
+    """Clean card container."""
     def __init__(self, master, **kwargs):
-        super().__init__(master, bg=CARD_BG, **kwargs)
+        super().__init__(master, bg=SURFACE, **kwargs)
         self.configure(highlightbackground=BORDER, highlightthickness=1)
 
 
+class SettingsDialog(tk.Toplevel):
+    """All settings in one modal window with tabs."""
+    def __init__(self, parent, app):
+        super().__init__(parent)
+        self.app = app
+        self.title('Налаштування')
+        self.geometry('700x550')
+        self.minsize(650, 500)
+        self.configure(bg=BG_COLOR)
+        self.transient(parent)
+        self.grab_set()
+        self.resizable(True, True)
+
+        # Center on parent
+        self.update_idletasks()
+        x = parent.winfo_rootx() + (parent.winfo_width() - self.winfo_width()) // 2
+        y = parent.winfo_rooty() + (parent.winfo_height() - self.winfo_height()) // 2
+        self.geometry(f'+{x}+{y}')
+
+        self._build_ui()
+
+    def _build_ui(self):
+        # Notebook for tabs
+        style = ttk.Style()
+        style.configure('Custom.TNotebook', background=BG_COLOR, borderwidth=0)
+        style.configure('Custom.TNotebook.Tab', padding=[20, 10], font=FONT_BODY)
+
+        notebook = ttk.Notebook(self, style='Custom.TNotebook')
+        notebook.pack(fill='both', expand=True, padx=PAD_X, pady=PAD_X)
+
+        # --- Tab 1: SKU Management ---
+        sku_frame = tk.Frame(notebook, bg=BG_COLOR)
+        notebook.add(sku_frame, text='  SKU Класифікація  ')
+        self._build_sku_tab(sku_frame)
+
+        # --- Tab 2: TMA Authorization ---
+        tma_frame = tk.Frame(notebook, bg=BG_COLOR)
+        notebook.add(tma_frame, text='  ТМА Авторизація  ')
+        self._build_tma_tab(tma_frame)
+
+        # --- Tab 3: Contract Defaults ---
+        contract_frame = tk.Frame(notebook, bg=BG_COLOR)
+        notebook.add(contract_frame, text='  Договори  ')
+        self._build_contract_tab(contract_frame)
+
+        # --- Tab 4: Service Prices ---
+        prices_frame = tk.Frame(notebook, bg=BG_COLOR)
+        notebook.add(prices_frame, text='  Ціни послуг  ')
+        self._build_prices_tab(prices_frame)
+
+        # Close button
+        btn_frame = tk.Frame(self, bg=BG_COLOR)
+        btn_frame.pack(fill='x', padx=PAD_X, pady=(0, PAD_X))
+        ModernButton(btn_frame, text='Закрити', style='secondary', command=self.destroy).pack(side='right')
+
+    def _build_sku_tab(self, parent):
+        """SKU classification management."""
+        # Toolbar
+        toolbar = tk.Frame(parent, bg=BG_COLOR)
+        toolbar.pack(fill='x', pady=(0, 8))
+
+        ModernButton(toolbar, text='➕ Додати SKU', style='primary', command=self._add_sku).pack(side='left', padx=(0, 8))
+        ModernButton(toolbar, text='💾 Зберегти зміни', style='success', command=self._save_sku_changes).pack(side='left', padx=(0, 8))
+        ModernButton(toolbar, text='🔄 Оновити', style='secondary', command=self._refresh_sku_table).pack(side='left')
+
+        # Table
+        table_frame = tk.Frame(parent, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
+        table_frame.pack(fill='both', expand=True)
+
+        columns = ('SKU_UA', 'BRAND', 'CATEGORY', 'ACTIVE')
+        self.sku_tree = ttk.Treeview(table_frame, columns=columns, show='headings', selectmode='extended')
+
+        col_config = {
+            'SKU_UA': ('SKU / Назва', 220),
+            'BRAND': ('Бренд', 150),
+            'CATEGORY': ('Категорія', 100),
+            'ACTIVE': ('Активний', 80),
+        }
+        for col, (title, width) in col_config.items():
+            self.sku_tree.heading(col, text=title)
+            self.sku_tree.column(col, width=width, anchor='w' if col != 'ACTIVE' else 'center')
+
+        # Scrollbars
+        vsb = ttk.Scrollbar(table_frame, orient='vertical', command=self.sku_tree.yview)
+        hsb = ttk.Scrollbar(table_frame, orient='horizontal', command=self.sku_tree.xview)
+        self.sku_tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+
+        self.sku_tree.grid(row=0, column=0, sticky='nsew')
+        vsb.grid(row=0, column=1, sticky='ns')
+        hsb.grid(row=1, column=0, sticky='ew')
+        table_frame.grid_rowconfigure(0, weight=1)
+        table_frame.grid_columnconfigure(0, weight=1)
+
+        # Context menu
+        self.sku_tree.bind('<Double-1>', self._on_sku_double_click)
+        self.sku_tree.bind('<Delete>', lambda e: self._delete_selected_skus())
+
+        self._refresh_sku_table()
+
+    def _refresh_sku_table(self):
+        for item in self.sku_tree.get_children():
+            self.sku_tree.delete(item)
+        df = get_all_skus_with_status()
+        for _, row in df.iterrows():
+            active_text = '✓' if row['active'] else '✗'
+            active_tag = 'active' if row['active'] else 'inactive'
+            self.sku_tree.insert('', 'end', values=(
+                row['SKU_UA'], row['BRAND'], row['CATEGORY'], active_text
+            ), tags=(active_tag,))
+        self.sku_tree.tag_configure('active', foreground=SUCCESS)
+        self.sku_tree.tag_configure('inactive', foreground=DANGER)
+
+    def _on_sku_double_click(self, event):
+        item = self.sku_tree.selection()[0] if self.sku_tree.selection() else None
+        if not item:
+            return
+        values = self.sku_tree.item(item, 'values')
+        self._edit_sku_dialog(values)
+
+    def _add_sku(self):
+        self._edit_sku_dialog()
+
+    def _edit_sku_dialog(self, values=None):
+        """Dialog to add/edit SKU."""
+        dialog = tk.Toplevel(self)
+        dialog.title('Редагувати SKU' if values else 'Додати SKU')
+        dialog.geometry('420x300')
+        dialog.configure(bg=BG_COLOR)
+        dialog.transient(self)
+        dialog.grab_set()
+
+        # Center on parent
+        dialog.update_idletasks()
+        x = self.winfo_rootx() + (self.winfo_width() - dialog.winfo_width()) // 2
+        y = self.winfo_rooty() + (self.winfo_height() - dialog.winfo_height()) // 2
+        dialog.geometry(f'+{x}+{y}')
+
+        fields = {}
+        labels = [
+            ('SKU_UA', 'SKU / Назва товару (обов\'язково)'),
+            ('BRAND', 'Бренд'),
+            ('CATEGORY', 'Категорія (ЛІК/ДД)'),
+        ]
+        for i, (key, label) in enumerate(labels):
+            tk.Label(dialog, text=label, font=FONT_BODY, bg=BG_COLOR, fg=TEXT_MAIN).grid(
+                row=i, column=0, sticky='w', padx=PAD_X, pady=(PAD_Y, 4)
+            )
+            if key == 'CATEGORY':
+                cb = ttk.Combobox(dialog, values=['ЛІК', 'ДД'], state='readonly', font=FONT_BODY, width=35)
+                cb.grid(row=i, column=0, sticky='ew', padx=PAD_X, pady=(0, 4))
+                fields[key] = cb
+            else:
+                entry = tk.Entry(dialog, font=FONT_BODY, relief='solid', bd=1, highlightthickness=1,
+                                highlightcolor=BORDER_FOCUS, highlightbackground=BORDER)
+                entry.grid(row=i, column=0, sticky='ew', padx=PAD_X, pady=(0, 4))
+                fields[key] = entry
+
+        # Active checkbox
+        active_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(dialog, text='Активний', variable=active_var, font=FONT_BODY, bg=BG_COLOR).grid(
+            row=3, column=0, sticky='w', padx=PAD_X, pady=(PAD_Y, 4)
+        )
+
+        # Pre-fill if editing
+        if values:
+            fields['SKU_UA'].insert(0, values[0])
+            fields['SKU_UA'].config(state='readonly')
+            fields['BRAND'].insert(0, values[1])
+            fields['CATEGORY'].set(values[2])
+            active_var.set(values[3] == '✓')
+
+        dialog.grid_columnconfigure(0, weight=1)
+
+        def save():
+            sku = fields['SKU_UA'].get().strip()
+            brand = fields['BRAND'].get().strip()
+            category = fields['CATEGORY'].get().strip()
+            active = active_var.get()
+
+            if not sku:
+                messagebox.showwarning('Помилка', 'SKU не може бути порожнім', parent=dialog)
+                return
+            if category not in ('ЛІК', 'ДД'):
+                messagebox.showwarning('Помилка', 'Категорія: ЛІК або ДД', parent=dialog)
+                return
+
+            save_sku_classification(sku, brand, category, active)
+            self._refresh_sku_table()
+            dialog.destroy()
+            self.app.status_var.set(f'SKU {"оновлено" if values else "додано"}: {sku}')
+
+        btn_frame = tk.Frame(dialog, bg=BG_COLOR)
+        btn_frame.grid(row=4, column=0, sticky='ew', padx=PAD_X, pady=PAD_Y)
+        ModernButton(btn_frame, text='Скасувати', style='secondary', command=dialog.destroy).pack(side='right', padx=(8, 0))
+        ModernButton(btn_frame, text='Зберегти', style='success', command=save).pack(side='right')
+
+    def _delete_selected_skus(self):
+        selected = self.sku_tree.selection()
+        if not selected:
+            return
+        if messagebox.askyesno('Підтвердження', f'Видалити {len(selected)} SKU?', parent=self):
+            for item in selected:
+                values = self.sku_tree.item(item, 'values')
+                sku = values[0]
+                # Deactivate instead of delete
+                save_sku_classification(sku, '', '', False)
+            self._refresh_sku_table()
+
+    def _save_sku_changes(self):
+        messagebox.showinfo('Збережено', 'Зміни автоматично зберігаються при редагуванні', parent=self)
+
+    def _build_tma_tab(self, parent):
+        """TMA Authorization per pharmacy."""
+        # Instructions
+        tk.Label(
+            parent,
+            text='Вартість послуг із авторизації (без ПДВ) для кожної мережі та категорії.',
+            font=FONT_SMALL, bg=BG_COLOR, fg=TEXT_MUTED, wraplength=600, justify='left'
+        ).pack(anchor='w', pady=(0, PAD_Y))
+
+        # Table
+        table_frame = tk.Frame(parent, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
+        table_frame.pack(fill='both', expand=True)
+
+        columns = ('PHARMACY', 'LIK', 'DD')
+        self.tma_tree = ttk.Treeview(table_frame, columns=columns, show='headings')
+        self.tma_tree.heading('PHARMACY', text='Мережа / Клієнт')
+        self.tma_tree.heading('LIK', text='ЛІК (грн.)')
+        self.tma_tree.heading('DD', text='ДД (грн.)')
+        self.tma_tree.column('PHARMACY', width=300, anchor='w')
+        self.tma_tree.column('LIK', width=150, anchor='e')
+        self.tma_tree.column('DD', width=150, anchor='e')
+
+        vsb = ttk.Scrollbar(table_frame, orient='vertical', command=self.tma_tree.yview)
+        self.tma_tree.configure(yscrollcommand=vsb.set)
+
+        self.tma_tree.grid(row=0, column=0, sticky='nsew')
+        vsb.grid(row=0, column=1, sticky='ns')
+        table_frame.grid_rowconfigure(0, weight=1)
+        table_frame.grid_columnconfigure(0, weight=1)
+
+        self.tma_tree.bind('<Double-1>', self._edit_tma_auth)
+
+        self._refresh_tma_table()
+
+    def _refresh_tma_table(self):
+        for item in self.tma_tree.get_children():
+            self.tma_tree.delete(item)
+        from convertor import load_tma_auth
+        auth_data = load_tma_auth()
+        for pharmacy, cats in sorted(auth_data.items()):
+            self.tma_tree.insert('', 'end', values=(
+                pharmacy,
+                f'{cats.get("ЛІК", 0):.2f}',
+                f'{cats.get("ДД", 0):.2f}',
+            ))
+
+    def _edit_tma_auth(self, event):
+        item = self.tma_tree.selection()[0] if self.tma_tree.selection() else None
+        if not item:
+            return
+        values = self.tma_tree.item(item, 'values')
+        pharmacy = values[0]
+        lik = float(values[1]) if values[1] else 0
+        dd = float(values[2]) if values[2] else 0
+
+        dialog = tk.Toplevel(self)
+        dialog.title(f'ТМА Авторизація: {pharmacy}')
+        dialog.geometry('350x220')
+        dialog.configure(bg=BG_COLOR)
+        dialog.transient(self)
+        dialog.grab_set()
+
+        for i, (label, var, val) in enumerate([
+            ('ЛІК (грн., без ПДВ)', 'lik', lik),
+            ('ДД (грн., без ПДВ)', 'dd', dd),
+        ]):
+            tk.Label(dialog, text=label, font=FONT_BODY, bg=BG_COLOR, fg=TEXT_MAIN).grid(
+                row=i, column=0, sticky='w', padx=PAD_X, pady=(PAD_Y, 4)
+            )
+            entry = tk.Entry(dialog, font=FONT_BODY, relief='solid', bd=1,
+                            highlightthickness=1, highlightcolor=BORDER_FOCUS, highlightbackground=BORDER)
+            entry.insert(0, f'{val:.2f}')
+            entry.grid(row=i, column=0, sticky='ew', padx=PAD_X, pady=(0, 4))
+            dialog.grid_columnconfigure(0, weight=1)
+            if i == 0:
+                lik_entry = entry
+            else:
+                dd_entry = entry
+
+        def save():
+            try:
+                set_tma_auth_amount(pharmacy, True, float(lik_entry.get() or 0))
+                set_tma_auth_amount(pharmacy, False, float(dd_entry.get() or 0))
+                self._refresh_tma_table()
+                self.app.status_var.set(f'ТМА авторизація оновлена: {pharmacy}')
+                dialog.destroy()
+            except ValueError:
+                messagebox.showwarning('Помилка', 'Введіть коректні числа', parent=dialog)
+
+        btn_frame = tk.Frame(dialog, bg=BG_COLOR)
+        btn_frame.grid(row=2, column=0, sticky='ew', padx=PAD_X, pady=PAD_Y)
+        ModernButton(btn_frame, text='Скасувати', style='secondary', command=dialog.destroy).pack(side='right', padx=(8, 0))
+        ModernButton(btn_frame, text='Зберегти', style='success', command=save).pack(side='right')
+
+    def _build_contract_tab(self, parent):
+        """Contract default values."""
+        tk.Label(
+            parent,
+            text='Значення за замовчуванням (використовуються, якщо в файлі реквізитів немає даних).',
+            font=FONT_SMALL, bg=BG_COLOR, fg=TEXT_MUTED, wraplength=600, justify='left'
+        ).pack(anchor='w', pady=(0, PAD_Y))
+
+        fields = [
+            ('DEFAULT_CONTRACT_NO', 'Номер договору', DEFAULT_CONTRACT_NO),
+            ('DEFAULT_CONTRACT_DATE', 'Дата договору (напр. 01 березня 2026 року)', DEFAULT_CONTRACT_DATE),
+            ('DEFAULT_TMA_CONTRACT_DATE', 'Дата договору для ТМА (напр. 27 лютого 2026 року)', DEFAULT_TMA_CONTRACT_DATE),
+            ('DEFAULT_EXECUTOR_NAME', 'Виконавець', DEFAULT_EXECUTOR_NAME),
+        ]
+
+        self.contract_entries = {}
+        for i, (key, label, default) in enumerate(fields):
+            tk.Label(parent, text=label, font=FONT_BODY, bg=BG_COLOR, fg=TEXT_MAIN).grid(
+                row=i, column=0, sticky='w', padx=PAD_X, pady=(PAD_Y, 4)
+            )
+            entry = tk.Entry(parent, font=FONT_BODY, relief='solid', bd=1,
+                            highlightthickness=1, highlightcolor=BORDER_FOCUS, highlightbackground=BORDER, width=50)
+            entry.insert(0, default)
+            entry.grid(row=i, column=0, sticky='ew', padx=PAD_X, pady=(0, 4))
+            self.contract_entries[key] = entry
+
+        parent.grid_columnconfigure(0, weight=1)
+
+        # Save button
+        btn_frame = tk.Frame(parent, bg=BG_COLOR)
+        btn_frame.grid(row=len(fields), column=0, sticky='ew', padx=PAD_X, pady=PAD_Y)
+        ModernButton(btn_frame, text='💾 Зберегти як нові дефолти', style='success',
+                    command=self._save_contract_defaults).pack(side='right')
+
+    def _save_contract_defaults(self):
+        """Note: This only affects current session. For persistent changes, edit config.py."""
+        from config import DEFAULT_CONTRACT_NO, DEFAULT_CONTRACT_DATE, DEFAULT_TMA_CONTRACT_DATE, DEFAULT_EXECUTOR_NAME
+        # Update runtime config
+        import config as cfg
+        cfg.DEFAULT_CONTRACT_NO = self.contract_entries['DEFAULT_CONTRACT_NO'].get()
+        cfg.DEFAULT_CONTRACT_DATE = self.contract_entries['DEFAULT_CONTRACT_DATE'].get()
+        cfg.DEFAULT_TMA_CONTRACT_DATE = self.contract_entries['DEFAULT_TMA_CONTRACT_DATE'].get()
+        cfg.DEFAULT_EXECUTOR_NAME = self.contract_entries['DEFAULT_EXECUTOR_NAME'].get()
+        messagebox.showinfo('Збережено', 'Зміни застосовано до поточної сесії.\nДля постійних змін відредагуйте config.py', parent=self)
+
+    def _build_prices_tab(self, parent):
+        """Service prices per brand."""
+        tk.Label(
+            parent,
+            text='Ціни послуг за брендом (грн.). Використовуються для розрахунку вартості.',
+            font=FONT_SMALL, bg=BG_COLOR, fg=TEXT_MUTED, wraplength=600, justify='left'
+        ).pack(anchor='w', pady=(0, PAD_Y))
+
+        # Table with two columns: Brand | Price
+        table_frame = tk.Frame(parent, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
+        table_frame.pack(fill='both', expand=True)
+
+        columns = ('BRAND', 'PRICE')
+        self.price_tree = ttk.Treeview(table_frame, columns=columns, show='headings')
+        self.price_tree.heading('BRAND', text='Бренд')
+        self.price_tree.heading('PRICE', text='Ціна (грн.)')
+        self.price_tree.column('BRAND', width=300, anchor='w')
+        self.price_tree.column('PRICE', width=150, anchor='e')
+
+        vsb = ttk.Scrollbar(table_frame, orient='vertical', command=self.price_tree.yview)
+        self.price_tree.configure(yscrollcommand=vsb.set)
+
+        self.price_tree.grid(row=0, column=0, sticky='nsew')
+        vsb.grid(row=0, column=1, sticky='ns')
+        table_frame.grid_rowconfigure(0, weight=1)
+        table_frame.grid_columnconfigure(0, weight=1)
+
+        self.price_tree.bind('<Double-1>', self._edit_price)
+
+        self._refresh_price_table()
+
+    def _refresh_price_table(self):
+        for item in self.price_tree.get_children():
+            self.price_tree.delete(item)
+        for brand, price in sorted(SERVICE_PRICES.items()):
+            self.price_tree.insert('', 'end', values=(brand, f'{price:.2f}'))
+
+    def _edit_price(self, event):
+        item = self.price_tree.selection()[0] if self.price_tree.selection() else None
+        if not item:
+            return
+        values = self.price_tree.item(item, 'values')
+        brand = values[0]
+        price = float(values[1])
+
+        dialog = tk.Toplevel(self)
+        dialog.title(f'Ціна: {brand}')
+        dialog.geometry('300x150')
+        dialog.configure(bg=BG_COLOR)
+        dialog.transient(self)
+        dialog.grab_set()
+
+        tk.Label(dialog, text=f'Бренд: {brand}', font=FONT_BODY, bg=BG_COLOR, fg=TEXT_MAIN).pack(anchor='w', padx=PAD_X, pady=(PAD_Y, 4))
+        tk.Label(dialog, text='Ціна (грн.):', font=FONT_BODY, bg=BG_COLOR, fg=TEXT_MAIN).pack(anchor='w', padx=PAD_X, pady=(PAD_Y, 4))
+
+        entry = tk.Entry(dialog, font=FONT_BODY, relief='solid', bd=1,
+                        highlightthickness=1, highlightcolor=BORDER_FOCUS, highlightbackground=BORDER)
+        entry.insert(0, f'{price:.2f}')
+        entry.pack(fill='x', padx=PAD_X, pady=(0, PAD_Y))
+
+        def save():
+            try:
+                SERVICE_PRICES[brand] = float(entry.get())
+                self._refresh_price_table()
+                self.app.status_var.set(f'Ціна оновлена: {brand} = {SERVICE_PRICES[brand]:.2f}')
+                dialog.destroy()
+            except ValueError:
+                messagebox.showwarning('Помилка', 'Введіть коректне число', parent=dialog)
+
+        btn_frame = tk.Frame(dialog, bg=BG_COLOR)
+        btn_frame.pack(fill='x', padx=PAD_X, pady=(0, PAD_Y))
+        ModernButton(btn_frame, text='Скасувати', style='secondary', command=dialog.destroy).pack(side='right', padx=(8, 0))
+        ModernButton(btn_frame, text='Зберегти', style='success', command=save).pack(side='right')
+
+
 class ReportApp:
+    """Main application window - clean and focused."""
 
     def __init__(self, root):
         self.root = root
         self.root.title('Генератор маркетингових звітів та актів')
-        self.root.geometry('900x600')
-        self.root.minsize(800, 550)
+        self.root.geometry('850x600')
+        self.root.minsize(750, 550)
         self.root.configure(bg=BG_COLOR)
 
         # Data
         self.df = None
         self.df_mhl = None
+        self.df_tma_offtake = None
         self.df_req = None
-        self.loaded_period = None  # (year, month)
+        self.loaded_period = None
         self.loading = False
+
+        # UI variables
         self.requisites_file_var = tk.StringVar(value='')
         self.pharmacy_name_var = tk.StringVar(value='')
         self.year_var = tk.StringVar(value=str(datetime.now().year))
         self.month_var = tk.StringVar(value=f'{datetime.now().month:02d}')
 
-        # TMA Authorization amounts (per network, separate for ЛИК/ДД)
-        self.tma_auth_lik_var = tk.StringVar(value='0.00')
-        self.tma_auth_dd_var = tk.StringVar(value='0.00')
-
-        # Auto-detect requisites on startup
+        # Auto-detect requisites
         self._auto_detect_requisites()
 
         self._build_ui()
 
     def _auto_detect_requisites(self):
-        """Try to find requisites file automatically on startup."""
         found = _find_requisites_file()
         if found:
             try:
@@ -139,10 +581,9 @@ class ReportApp:
                 self.requisites_file_var.set(found.name)
                 self._update_pharmacy_combo()
             except Exception:
-                pass  # Silently fail, user can select manually
+                pass
 
     def _build_ui(self):
-        # Root container
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
 
@@ -150,551 +591,355 @@ class ReportApp:
         main.grid(row=0, column=0, sticky='nsew', padx=24, pady=24)
         main.columnconfigure(0, weight=1)
 
-        # Header
+        # --- Header ---
         header = tk.Frame(main, bg=BG_COLOR)
         header.grid(row=0, column=0, sticky='ew', pady=(0, 24))
         header.columnconfigure(1, weight=1)
 
-        tk.Label(
-            header,
-            text='Генератор звітів та актів',
-            font=FONT_TITLE,
-            bg=BG_COLOR,
-            fg=TEXT_MAIN
-        ).grid(row=0, column=0, sticky='w')
+        tk.Label(header, text='Генератор звітів та актів',
+                font=FONT_TITLE, bg=BG_COLOR, fg=TEXT_MAIN).grid(row=0, column=0, sticky='w')
 
-        # Requisites card
+        # Settings button (top right)
+        ModernButton(header, text='⚙️ Налаштування', style='outline',
+                    command=self.open_settings).grid(row=0, column=2, sticky='e')
+
+        # --- Requisites Card ---
         req_card = Card(main, padx=20, pady=16)
         req_card.grid(row=1, column=0, sticky='ew', pady=(0, 16))
         req_card.columnconfigure(1, weight=1)
 
-        tk.Label(
-            req_card,
-            text='Файл реквізитів',
-            font=FONT_SUBTITLE,
-            bg=CARD_BG,
-            fg=TEXT_MAIN
-        ).grid(row=0, column=0, columnspan=3, sticky='w', pady=(0, 8))
+        tk.Label(req_card, text='Файл реквізитів',
+                font=FONT_SUBTITLE, bg=SURFACE, fg=TEXT_MAIN).grid(row=0, column=0, columnspan=3, sticky='w', pady=(0, 8))
 
-        self.req_entry = tk.Entry(
-            req_card,
-            textvariable=self.requisites_file_var,
-            font=FONT_BODY,
-            state='readonly',
-            readonlybackground=CARD_BG,
-            relief='solid',
-            bd=1,
-            highlightthickness=1,
-            highlightcolor=PRIMARY,
-            highlightbackground=BORDER
-        )
+        self.req_entry = tk.Entry(req_card, textvariable=self.requisites_file_var,
+                                 font=FONT_BODY, state='readonly',
+                                 readonlybackground=SURFACE, relief='solid', bd=1,
+                                 highlightthickness=1, highlightcolor=BORDER_FOCUS, highlightbackground=BORDER)
         self.req_entry.grid(row=1, column=0, columnspan=2, sticky='ew', padx=(0, 10))
 
-        ModernButton(
-            req_card, text='Обрати файл...', style='outline',
-            command=self.select_requisites_file
-        ).grid(row=1, column=2, sticky='e')
+        ModernButton(req_card, text='Обрати файл...', style='outline',
+                    command=self.select_requisites_file).grid(row=1, column=2, sticky='e')
 
-        # Pharmacy selection card
+        # --- Pharmacy Selection ---
         pharm_card = Card(main, padx=20, pady=16)
         pharm_card.grid(row=2, column=0, sticky='ew', pady=(0, 16))
         pharm_card.columnconfigure(1, weight=1)
 
-        tk.Label(
-            pharm_card,
-            text='Мережа / Клієнт',
-            font=FONT_SUBTITLE,
-            bg=CARD_BG,
-            fg=TEXT_MAIN
-        ).grid(row=0, column=0, columnspan=2, sticky='w', pady=(0, 8))
+        # Row 0: label
+        tk.Label(pharm_card, text='Мережа / Клієнт',
+                font=FONT_SUBTITLE, bg=SURFACE, fg=TEXT_MAIN).grid(row=0, column=0, columnspan=2, sticky='w', pady=(0, 8))
 
-        self.pharmacy_combo = ttk.Combobox(
-            pharm_card,
-            textvariable=self.pharmacy_name_var,
-            state='readonly',
-            font=FONT_BODY,
-            width=50
-        )
+        # Row 1: combobox + TMA auth preview
+        self.pharmacy_combo = ttk.Combobox(pharm_card, textvariable=self.pharmacy_name_var,
+                                          state='readonly', font=FONT_BODY, width=45)
         self.pharmacy_combo.grid(row=1, column=0, sticky='ew')
         self.pharmacy_combo.bind('<<ComboboxSelected>>', lambda e: self._on_pharmacy_change())
 
-        # Period selection card (Month/Year only)
+        # TMA auth preview (read-only)
+        auth_frame = tk.Frame(pharm_card, bg=SURFACE)
+        auth_frame.grid(row=1, column=1, sticky='e', padx=(16, 0))
+        self.tma_auth_preview = tk.Label(auth_frame, text='ТМА: ЛІК 0.00 / ДД 0.00',
+                                        font=FONT_SMALL, bg=SURFACE, fg=TEXT_MUTED)
+        self.tma_auth_preview.pack()
+
+        # --- Period Selection ---
         period_card = Card(main, padx=20, pady=16)
         period_card.grid(row=3, column=0, sticky='ew', pady=(0, 24))
         period_card.columnconfigure(1, weight=1)
 
-        tk.Label(
-            period_card,
-            text='Звітний період',
-            font=FONT_SUBTITLE,
-            bg=CARD_BG,
-            fg=TEXT_MAIN
-        ).grid(row=0, column=0, columnspan=3, sticky='w', pady=(0, 8))
+        tk.Label(period_card, text='Звітний період',
+                font=FONT_SUBTITLE, bg=SURFACE, fg=TEXT_MAIN).grid(row=0, column=0, columnspan=3, sticky='w', pady=(0, 8))
 
-        # Year dropdown
         years = [str(y) for y in range(2024, datetime.now().year + 2)]
-        tk.Label(period_card, text='Рік', font=FONT_BODY, bg=CARD_BG, fg=TEXT_MUTED).grid(row=1, column=0, sticky='w')
-        year_combo = ttk.Combobox(
-            period_card, textvariable=self.year_var, values=years,
-            state='readonly', font=FONT_BODY, width=10
-        )
+        tk.Label(period_card, text='Рік', font=FONT_BODY, bg=SURFACE, fg=TEXT_MUTED).grid(row=1, column=0, sticky='w')
+        year_combo = ttk.Combobox(period_card, textvariable=self.year_var, values=years,
+                                 state='readonly', font=FONT_BODY, width=10)
         year_combo.grid(row=2, column=0, sticky='w', padx=(0, 16), pady=(0, 8))
 
-        # Month dropdown
-        months = [f'{m:02d}' for m in range(1, 13)]
-        month_names = ['Січень', 'Лютий', 'Березень', 'Квітень', 'Травень', 'Червень',
-                       'Липень', 'Серпень', 'Вересень', 'Жовтень', 'Листопад', 'Грудень']
-        tk.Label(period_card, text='Місяць', font=FONT_BODY, bg=CARD_BG, fg=TEXT_MUTED).grid(row=1, column=1, sticky='w')
-        self.month_combo = ttk.Combobox(
-            period_card, textvariable=self.month_var,
-            values=[f'{m:02d} — {n}' for m, n in zip(range(1, 13), month_names)],
-            state='readonly', font=FONT_BODY, width=22
-        )
+        months = [f'{m:02d} — {n}' for m, n in zip(range(1, 13), [
+            'Січень', 'Лютий', 'Березень', 'Квітень', 'Травень', 'Червень',
+            'Липень', 'Серпень', 'Вересень', 'Жовтень', 'Листопад', 'Грудень'
+        ])]
+        tk.Label(period_card, text='Місяць', font=FONT_BODY, bg=SURFACE, fg=TEXT_MUTED).grid(row=1, column=1, sticky='w')
+        self.month_combo = ttk.Combobox(period_card, textvariable=self.month_var,
+                                       values=months, state='readonly', font=FONT_BODY, width=22)
         self.month_combo.grid(row=2, column=1, sticky='w', pady=(0, 8))
 
-        # TMA Authorization card
-        tma_card = Card(main, padx=20, pady=16)
-        tma_card.grid(row=4, column=0, sticky='ew', pady=(0, 16))
-        tma_card.columnconfigure(1, weight=1)
-        tma_card.columnconfigure(3, weight=1)
-
-        tk.Label(
-            tma_card,
-            text='ТМA Авторизація (вартість послуг із авторизації, без ПДВ)',
-            font=FONT_SUBTITLE,
-            bg=CARD_BG,
-            fg=TEXT_MAIN
-        ).grid(row=0, column=0, columnspan=4, sticky='w', pady=(0, 8))
-
-        # ЛИК field
-        tk.Label(tma_card, text='ЛІК', font=FONT_BODY, bg=CARD_BG, fg=TEXT_MUTED).grid(row=1, column=0, sticky='w', padx=(0, 10))
-        self.tma_auth_lik_entry = tk.Entry(
-            tma_card,
-            textvariable=self.tma_auth_lik_var,
-            font=FONT_BODY,
-            relief='solid',
-            bd=1,
-            highlightthickness=1,
-            highlightcolor=PRIMARY,
-            highlightbackground=BORDER,
-            width=15
-        )
-        self.tma_auth_lik_entry.grid(row=1, column=1, sticky='w', padx=(0, 20))
-        self.tma_auth_lik_entry.bind('<FocusOut>', lambda e: self._save_tma_auth())
-
-        # ДД field
-        tk.Label(tma_card, text='ДД', font=FONT_BODY, bg=CARD_BG, fg=TEXT_MUTED).grid(row=1, column=2, sticky='w', padx=(0, 10))
-        self.tma_auth_dd_entry = tk.Entry(
-            tma_card,
-            textvariable=self.tma_auth_dd_var,
-            font=FONT_BODY,
-            relief='solid',
-            bd=1,
-            highlightthickness=1,
-            highlightcolor=PRIMARY,
-            highlightbackground=BORDER,
-            width=15
-        )
-        self.tma_auth_dd_entry.grid(row=1, column=3, sticky='w')
-        self.tma_auth_dd_entry.bind('<FocusOut>', lambda e: self._save_tma_auth())
-
-        # Action buttons
+        # --- Action Buttons ---
         actions = tk.Frame(main, bg=BG_COLOR)
-        actions.grid(row=5, column=0, sticky='ew', pady=(8, 16))
+        actions.grid(row=4, column=0, sticky='ew', pady=(8, 16))
         actions.columnconfigure(0, weight=1)
 
-        self.load_button = ModernButton(
-            actions, text='🔄 Завантажити дані', style='primary',
-            command=self.load_data
-        )
+        self.load_button = ModernButton(actions, text='🔄 Завантажити дані', style='primary',
+                                       command=self.load_data)
         self.load_button.pack(side='left', padx=(0, 10))
 
-        ModernButton(
-            actions, text='📥 Згенерувати Excel', style='success',
-            command=self.download
-        ).pack(side='left', padx=(0, 10))
+        ModernButton(actions, text='📥 Згенерувати Excel', style='success',
+                    command=self.download).pack(side='left', padx=(0, 10))
 
-        ModernButton(
-            actions, text='⚙️ SKU', style='secondary',
-            command=self.manage_sku_active
-        ).pack(side='left', padx=(0, 10))
+        ModernButton(actions, text='👁 Попередній перегляд', style='secondary',
+                    command=self.preview).pack(side='left')
 
-        ModernButton(
-            actions, text='🏷️ Класифікувати SKU', style='secondary',
-            command=self.classify_unknown_skus
-        ).pack(side='left')
-
-        # Status bar
+        # --- Status Bar (no progress bar) ---
         self.status_var = tk.StringVar(value='Готово до роботи')
-        status_bar = tk.Frame(main, bg=CARD_BG, highlightbackground=BORDER, highlightthickness=1)
-        status_bar.grid(row=6, column=0, sticky='ew', pady=(16, 0))
+        status_bar = tk.Frame(main, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
+        status_bar.grid(row=5, column=0, sticky='ew', pady=(16, 0))
         status_bar.columnconfigure(0, weight=1)
 
-        self.status_label = tk.Label(
-            status_bar,
-            textvariable=self.status_var,
-            font=FONT_MONO,
-            bg=CARD_BG,
-            fg=TEXT_MUTED,
-            anchor='w',
-            padx=12,
-            pady=8
-        )
+        self.status_label = tk.Label(status_bar, textvariable=self.status_var,
+                                    font=FONT_MONO, bg=SURFACE, fg=TEXT_MUTED,
+                                    anchor='w', padx=12, pady=8)
         self.status_label.grid(row=0, column=0, sticky='ew')
 
-        # Progress indicator (hidden by default)
-        self.progress = ttk.Progressbar(
-            status_bar, mode='indeterminate', length=200
-        )
-        self.progress.grid(row=0, column=1, padx=12, pady=8)
+    def open_settings(self):
+        SettingsDialog(self.root, self)
 
     def _on_pharmacy_change(self):
-        """Called when pharmacy selection changes - load TMA auth values."""
         self._load_tma_auth()
 
     def _load_tma_auth(self):
-        """Load TMA authorization amounts for selected pharmacy."""
         pharmacy = self.pharmacy_name_var.get().strip()
         if pharmacy:
-            lik_amount = get_tma_auth_amount(pharmacy, is_lic=True)
-            dd_amount = get_tma_auth_amount(pharmacy, is_lic=False)
-            self.tma_auth_lik_var.set(f'{lik_amount:.2f}')
-            self.tma_auth_dd_var.set(f'{dd_amount:.2f}')
+            lik = get_tma_auth_amount(pharmacy, True)
+            dd = get_tma_auth_amount(pharmacy, False)
+            self.tma_auth_lik_var.set(f'{lik:.2f}')
+            self.tma_auth_dd_var.set(f'{dd:.2f}')
+            self.tma_auth_preview.config(text=f'ТМА: ЛІК {lik:.2f} / ДД {dd:.2f}')
         else:
-            self.tma_auth_lik_var.set('0.00')
-            self.tma_auth_dd_var.set('0.00')
-
-    def _save_tma_auth(self):
-        """Save TMA authorization amounts for selected pharmacy."""
-        pharmacy = self.pharmacy_name_var.get().strip()
-        if not pharmacy:
-            return
-        try:
-            lik_amount = float(self.tma_auth_lik_var.get() or 0)
-            dd_amount = float(self.tma_auth_dd_var.get() or 0)
-            set_tma_auth_amount(pharmacy, True, lik_amount)
-            set_tma_auth_amount(pharmacy, False, dd_amount)
-            self.status_var.set(f'Збережено ТМА авторизацію для {pharmacy}: ЛІК={lik_amount:.2f}, ДД={dd_amount:.2f}')
-        except ValueError:
-            pass  # Invalid input, ignore
+            self.tma_auth_preview.config(text='ТМА: виберіть мережу')
 
     def _get_period_range(self):
-        """Get period start/end as YYYY-MM-DD for the selected month/year."""
         year = int(self.year_var.get())
         month = int(self.month_var.get()[:2])
         start = f'{year}-{month:02d}-01'
-        # Last day of month
         if month == 12:
             end = f'{year + 1}-01-01'
         else:
             end = f'{year}-{month + 1:02d}-01'
         from datetime import timedelta
         end_date = datetime.strptime(end, '%Y-%m-%d') - timedelta(days=1)
-        end = end_date.strftime('%Y-%m-%d')
-        return start, end
+        return start, end_date.strftime('%Y-%m-%d')
 
-    def _get_period_display(self):
-        """Get human-readable period string."""
-        year = self.year_var.get()
-        month_idx = int(self.month_var.get()[:2]) - 1
-        month_names = ['січня', 'лютого', 'березня', 'квітня', 'травня', 'червня',
-                       'липня', 'серпня', 'вересня', 'жовтня', 'листопада', 'грудня']
-        return f'{month_names[month_idx]} {year}'
-
-    def _selected_requisites(self):
-        if self.df_req is None or self.df_req.empty:
-            raise ValueError('Будь ласка, оберіть файл реквізитів!')
-        return self.df_req
-
-    def _query_period(self):
+    def _validate_period(self):
         return self._get_period_range()
+
+    def select_requisites_file(self):
+        filename = filedialog.askopenfilename(
+            title='Виберіть файл реквізитів',
+            initialdir=str(Path.cwd()),
+            filetypes=[('Усі таблиці', '*.csv *.xlsx *.xls'), ('CSV', '*.csv'), ('Excel', '*.xlsx *.xls')]
+        )
+        if not filename:
+            return
+        try:
+            self.df_req = load_requisites_file(filename)
+            if self.df_req.empty:
+                raise ValueError('Файл реквізитів порожній.')
+        except (OSError, ValueError, UnicodeError) as e:
+            messagebox.showerror('Помилка', str(e))
+            return
+
+        self.requisites_file_var.set(Path(filename).name)
+        self._update_pharmacy_combo()
+
+    def _update_pharmacy_combo(self):
+        if self.df_req is None or self.df_req.empty:
+            return
+        target_col = None
+        for col in ['chain_name', 'Клиент из базы данных', 'Мережа', 'Назва']:
+            if col in self.df_req.columns:
+                target_col = col
+                break
+        if target_col:
+            chains = self.df_req[target_col].dropna().astype(str).str.strip()
+            unique = sorted(c for c in chains.unique() if c and c.lower() != 'nan')
+            self.pharmacy_combo['values'] = tuple(unique)
+            if unique:
+                self.pharmacy_combo.current(0)
+                self._load_tma_auth()
+            self.status_var.set(f'Завантажено мереж: {len(unique)}')
+
+    def _filtered_pharmacy_data(self):
+        if self.df is None or self.df.empty:
+            return pd.DataFrame(columns=['CHAIN_NAME', 'PHARMACY_NAME', 'BRAND', 'MERCH', 'Price'])
+        selected = self.pharmacy_name_var.get().strip()
+        if not selected:
+            raise ValueError('Оберіть мережу.')
+        if 'CHAIN_NAME' in self.df.columns:
+            filtered = self.df[
+                self.df['CHAIN_NAME'].fillna('').astype(str).str.strip().str.lower() == selected.lower()
+            ]
+        else:
+            filtered = self.df[
+                self.df['PHARMACY_NAME'].fillna('').astype(str).str.lower().str.contains(selected.lower())
+            ]
+        return filtered if not filtered.empty else self.df.iloc[0:0]
+
+    def _filtered_mhl_data(self):
+        if self.df_mhl is None or self.df_mhl.empty:
+            return self.df_mhl
+        selected = self.pharmacy_name_var.get().strip()
+        if not selected:
+            return self.df_mhl
+        if 'CHAIN_NAME' in self.df_mhl.columns:
+            filtered = self.df_mhl[
+                self.df_mhl['CHAIN_NAME'].fillna('').astype(str).str.strip().str.lower() == selected.lower()
+            ]
+        else:
+            return self.df_mhl.iloc[0:0]
+        return filtered if not filtered.empty else self.df_mhl.iloc[0:0]
 
     def load_data(self):
         try:
-            period = self._query_period()
-        except ValueError as error:
-            messagebox.showwarning('Попередження', str(error))
+            period = self._get_period_range()
+        except ValueError as e:
+            messagebox.showwarning('Попередження', str(e))
             return
 
         if self.loading:
             return
 
-        self._load_data_async(period)
-
-    def _load_data_async(self, period):
         self.loading = True
-        self.load_button.configure(state='disabled')
-        self.status_var.set(
-            f'Завантаження даних з БД за період {period[0]} — {period[1]}...'
-        )
+        self.load_button.config(state='disabled', text='⏳ Завантаження...')
+        self.status_var.set(f'Завантаження даних за {period[0]} — {period[1]}...')
 
-        # Get selected pharmacy/network for MHL filtering
-        selected_pharmacy = self.pharmacy_name_var.get().strip()
+        selected = self.pharmacy_name_var.get().strip()
 
         def load():
-            data = None
-            mhl_data = None
-            tma_offtake_data = None
-            data_error = None
-            mhl_error = None
-            offtake_error = None
+            data = mhl_data = offtake_data = None
+            data_error = mhl_error = offtake_error = None
             try:
-                data = get_pharmacy_data(*period, chain_name=selected_pharmacy if selected_pharmacy else None)
-            except DataLoadError as load_error:
-                data_error = load_error
-            except Exception as load_error:
-                data_error = DataLoadError(f'Несподівана помилка завантаження звіту: {load_error}')
-                data_error.__cause__ = load_error
+                data = get_pharmacy_data(*period, chain_name=selected if selected else None)
+            except DataLoadError as e:
+                data_error = e
+            except Exception as e:
+                data_error = DataLoadError(f'Несподівана помилка: {e}')
             try:
-                # Load MHL data filtered by selected network (chain_name)
-                mhl_data = get_mhl_data(*period, chain_name=selected_pharmacy if selected_pharmacy else None)
-            except DataLoadError as load_error:
-                mhl_error = load_error
-            except Exception as load_error:
-                mhl_error = DataLoadError(f'Несподівана помилка завантаження MHL: {load_error}')
-                mhl_error.__cause__ = load_error
+                mhl_data = get_mhl_data(*period, chain_name=selected if selected else None)
+            except DataLoadError as e:
+                mhl_error = e
+            except Exception as e:
+                mhl_error = DataLoadError(f'Несподівана помилка MHL: {e}')
             try:
-                # Load TMA offtake data (sold quantities)
-                tma_offtake_data = get_tma_offtake_data(*period, chain_name=selected_pharmacy if selected_pharmacy else None)
-            except DataLoadError as load_error:
-                offtake_error = load_error
-            except Exception as load_error:
-                offtake_error = DataLoadError(f'Несподівана помилка завантаження TMA offtake: {load_error}')
-                offtake_error.__cause__ = load_error
-            self.root.after(
-                0,
-                lambda: self._data_loaded(
-                    data, mhl_data, tma_offtake_data, period, data_error, mhl_error, offtake_error
-                ),
-            )
+                offtake_data = get_tma_offtake_data(*period, chain_name=selected if selected else None)
+            except DataLoadError as e:
+                offtake_error = e
+            except Exception as e:
+                offtake_error = DataLoadError(f'Несподівана помилка offtake: {e}')
+
+            self.root.after(0, lambda: self._data_loaded(data, mhl_data, offtake_data, period,
+                                                        data_error, mhl_error, offtake_error))
 
         threading.Thread(target=load, daemon=True).start()
 
-    def _data_loaded(self, data, mhl_data, tma_offtake_data, period, data_error=None, mhl_error=None, offtake_error=None):
+    def _data_loaded(self, data, mhl_data, offtake_data, period, data_error=None, mhl_error=None, offtake_error=None):
         self.loading = False
-        self.load_button.configure(state='normal')
+        self.load_button.config(state='normal', text='🔄 Завантажити дані')
         self.df = data
         self.df_mhl = mhl_data
-        self.df_tma_offtake = tma_offtake_data
+        self.df_tma_offtake = offtake_data
 
-        has_pharmacy = data is not None and not data.empty
+        has_pharm = data is not None and not data.empty
         has_mhl = mhl_data is not None and not mhl_data.empty
 
-        if data_error is not None:
+        if data_error:
             self.loaded_period = None
-            self.status_var.set(f'Помилка завантаження звіту з БД: {data_error}')
-        elif not has_pharmacy and not has_mhl:
+            self.status_var.set(f'Помилка: {data_error}')
+        elif not has_pharm and not has_mhl:
             self.loaded_period = None
-            self.status_var.set('За вказаний період дані відсутні (жодного джерела).')
+            self.status_var.set('Дані відсутні за цей період.')
         else:
-            # Set loaded_period if EITHER pharmacy OR MHL data exists
             self.loaded_period = period
-            lik_count, dd_count, unknown_count = mhl_brand_counts(mhl_data)
-            status = f'Звіт: {len(data) if has_pharmacy else 0} рядків'
-            if mhl_error is not None:
+            lik_c, dd_c, unk_c = mhl_brand_counts(mhl_data)
+            status = f'Звіт: {len(data) if has_pharm else 0} рядків'
+            if mhl_error:
                 status += f'; помилка MHL: {mhl_error}'
             else:
-                unknown_samples = mhl_unknown_samples(mhl_data)
-                status += (
-                    f'; MHL SQL: {len(mhl_data) if has_mhl else 0} рядків; '
-                    f'ЛІК: {lik_count}; ДД: {dd_count}; '
-                    f'невідомі: {unknown_count}'
-                )
-                if unknown_samples:
-                    status += f'; приклади: {" | ".join(unknown_samples)}'
+                unk_s = mhl_unknown_samples(mhl_data)
+                status += f'; MHL: {len(mhl_data) if has_mhl else 0} рядків; ЛІК: {lik_c}; ДД: {dd_c}; невідомі: {unk_c}'
+                if unk_s:
+                    status += f'; приклади: {" | ".join(unk_s)}'
             self.status_var.set(status)
-
-    def _update_pharmacy_combo(self):
-        """Заповнює комбобокс мережами з файлу реквізитів"""
-        if self.df_req is not None and not self.df_req.empty:
-            target_col = None
-            for col_candidate in [
-                'chain_name',
-                'Клиент из базы данных',
-                'Мережа',
-                'Назва',
-            ]:
-                if col_candidate in self.df_req.columns:
-                    target_col = col_candidate
-                    break
-
-            if target_col:
-                chains = (
-                    self.df_req[target_col].dropna().astype(str).str.strip()
-                )
-                unique_chains = sorted(
-                    c for c in chains.unique() if c and c.lower() != 'nan'
-                )
-                # Only show specific networks, no "Усі аптеки" option
-                self.pharmacy_combo['values'] = tuple(unique_chains)
-                if unique_chains:
-                    self.pharmacy_combo.current(0)
-                    # Load TMA auth for the first selected pharmacy
-                    self._load_tma_auth()
-                self.status_var.set(
-                    f'Завантажено мереж з реквізитів: {len(unique_chains)}'
-                )
-
-    def _filtered_pharmacy_data(self):
-        """Filter merchandising data by selected network (always a specific network).
-        Returns empty DataFrame (not error) if no pharmacy data — caller handles MHL fallback."""
-        if self.df is None or self.df.empty:
-            # Return empty DataFrame with expected columns instead of raising
-            return pd.DataFrame(columns=['CHAIN_NAME', 'PHARMACY_NAME', 'BRAND', 'MERCH', 'Price'])
-
-        selected_name = self.pharmacy_name_var.get().strip()
-        if not selected_name:
-            raise ValueError('Будь ласка, оберіть мережу.')
-
-        # Перевіряємо наявність колонки CHAIN_NAME в датасеті з бази даних
-        if 'CHAIN_NAME' in self.df.columns:
-            filtered = self.df[
-                self.df['CHAIN_NAME'].fillna('').astype(str).str.strip().str.lower()
-                == selected_name.lower()
-            ]
-        else:
-            # Запасний варіант, якщо колонка називається інакше
-            filtered = self.df[
-                self.df['PHARMACY_NAME'].fillna('').astype(str).str.lower().str.contains(selected_name.lower())
-            ]
-
-        if filtered.empty:
-            return self.df.iloc[0:0]
-
-        return filtered
-
-    def _filtered_mhl_data(self):
-        """Filter MHL data by selected network (always a specific network)."""
-        if self.df_mhl is None or self.df_mhl.empty:
-            return self.df_mhl
-
-        selected_name = self.pharmacy_name_var.get().strip()
-        if not selected_name:
-            return self.df_mhl
-
-        # MHL data uses CHAIN_NAME column
-        if 'CHAIN_NAME' in self.df_mhl.columns:
-            filtered = self.df_mhl[
-                self.df_mhl['CHAIN_NAME'].fillna('').astype(str).str.strip().str.lower()
-                == selected_name.lower()
-            ]
-        else:
-            # Fallback - return empty if no chain column
-            return self.df_mhl.iloc[0:0]
-
-        if filtered.empty:
-            return self.df_mhl.iloc[0:0]
-
-        return filtered
-    def select_requisites_file(self):
-        filename = filedialog.askopenfilename(
-            title='Виберіть файл реквізитів',
-            initialdir=str(Path.cwd()),
-            filetypes=[
-                ('Усі таблиці', '*.csv *.xlsx *.xls'),
-                ('CSV файли', '*.csv'),
-                ('Excel файли', '*.xlsx *.xls'),
-            ],
-        )
-        if not filename:
-            return
-        try:
-            requisites = load_requisites_file(filename)
-            if requisites.empty:
-                raise ValueError('Файл реквізитів порожній.')
-        except (OSError, ValueError, UnicodeError) as error:
-            messagebox.showerror('Помилка', str(error))
-            return
-
-        self.df_req = requisites
-        self.requisites_file_var.set(filename)
-        self._update_pharmacy_combo()
-
-    def _validate_period(self):
-        """Validate and return period as YYYY-MM-DD strings."""
-        return self._query_period()
-
-    def _get_preview_data(self):
-        self._selected_requisites()
-        period = self._query_period()
-        if self.loaded_period != period:
-            raise ValueError(
-                'Спочатку завантажте дані для вказаного періоду.'
-            )
-
-        # Get filtered pharmacy data for selected chain
-        pharmacy_df = self._filtered_pharmacy_data()
-        # Use FULL MHL data (not filtered by chain) - chain names may differ between requisites and MHL data
-        mhl_df = self.df_mhl
-
-        # Allow if either pharmacy data OR MHL data exists
-        if (pharmacy_df is None or pharmacy_df.empty) and (mhl_df is None or mhl_df.empty):
-            raise ValueError('Немає даних для формування звіту за цією мережею.')
-
-        # Build preview from pharmacy data (if any)
-        report = build_report_dataframe(pharmacy_df)
-        # If pharmacy data empty but MHL exists, create minimal preview
-        if (report is None or report.empty) and mhl_df is not None and not mhl_df.empty:
-            report = pd.DataFrame({'Повідомлення': [f'Дані викладки відсутні. MHL даних: {len(mhl_df)} рядків (усі мережі)']})
-
-        return report
 
     def preview(self):
         try:
             report = self._get_preview_data()
-        except (ValueError, KeyError) as error:
-            messagebox.showwarning('Попередження', str(error))
+        except (ValueError, KeyError) as e:
+            messagebox.showwarning('Попередження', str(e))
             return
 
-        self.tree.delete(*self.tree.get_children())
-        columns = [str(column) for column in report.columns]
-        self.tree['columns'] = columns
-        for column in columns:
-            self.tree.heading(column, text=column)
-            self.tree.column(column, width=150, minwidth=80, anchor='center')
+        # Show in new window
+        win = tk.Toplevel(self.root)
+        win.title('Попередній перегляд')
+        win.geometry('900x500')
+        win.configure(bg=BG_COLOR)
 
-        for row in report.head(200).itertuples(index=False, name=None):
-            self.tree.insert(
-                '', 'end', values=tuple(str(value) for value in row)
-            )
+        tree = ttk.Treeview(win, show='headings')
+        tree['columns'] = list(report.columns)
+        for col in report.columns:
+            tree.heading(col, text=col)
+            tree.column(col, width=120, anchor='center')
+        for row in report.head(200).itertuples(index=False):
+            tree.insert('', 'end', values=[str(v) for v in row])
 
-        self.status_var.set(
-            f'Відображено рядків: {min(len(report), 200)} з {len(report)}'
-        )
+        vsb = ttk.Scrollbar(win, orient='vertical', command=tree.yview)
+        hsb = ttk.Scrollbar(win, orient='horizontal', command=tree.xview)
+        tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+        tree.grid(row=0, column=0, sticky='nsew')
+        vsb.grid(row=0, column=1, sticky='ns')
+        hsb.grid(row=1, column=0, sticky='ew')
+        win.grid_rowconfigure(0, weight=1)
+        win.grid_columnconfigure(0, weight=1)
+
+        tk.Label(win, text=f'Показано {min(len(report), 200)} з {len(report)} рядків',
+                font=FONT_SMALL, bg=BG_COLOR, fg=TEXT_MUTED).grid(row=2, column=0, sticky='w', padx=PAD_X, pady=8)
+
+    def _get_preview_data(self):
+        self._selected_requisites()
+        period = self._get_period_range()
+        if self.loaded_period != period:
+            raise ValueError('Спочатку завантажте дані для вказаного періоду.')
+        pharmacy_df = self._filtered_pharmacy_data()
+        mhl_df = self.df_mhl
+        if (pharmacy_df is None or pharmacy_df.empty) and (mhl_df is None or mhl_df.empty):
+            raise ValueError('Немає даних для цієї мережі.')
+        report = build_report_dataframe(pharmacy_df)
+        if (report is None or report.empty) and mhl_df is not None and not mhl_df.empty:
+            report = pd.DataFrame({'Повідомлення': [f'Дані викладки відсутні. MHL: {len(mhl_df)} рядків']})
+        return report
+
+    def _selected_requisites(self):
+        if self.df_req is None or self.df_req.empty:
+            raise ValueError('Оберіть файл реквізитів!')
+        return self.df_req
 
     def download(self):
         try:
             self._get_preview_data()
-        except (ValueError, KeyError) as error:
-            messagebox.showwarning('Попередження', str(error))
+        except (ValueError, KeyError) as e:
+            messagebox.showwarning('Попередження', str(e))
             return
 
-        # Validate TMA authorization amounts
+        # Validate TMA auth
         pharmacy = self.pharmacy_name_var.get().strip()
         if pharmacy:
-            lik_auth = get_tma_auth_amount(pharmacy, is_lic=True)
-            dd_auth = get_tma_auth_amount(pharmacy, is_lic=False)
-            if lik_auth == 0.0 and dd_auth == 0.0:
-                if not messagebox.askyesno(
-                    'Увага: авторизація не задана',
-                    f'Для мережі "{pharmacy}" не встановлено суми ТМА авторизації (ЛІК={lik_auth:.2f}, ДД={dd_auth:.2f}).\n'
-                    'Звіт згенерується з нульовою авторизацією. Продовжити?'
-                ):
+            lik = get_tma_auth_amount(pharmacy, True)
+            dd = get_tma_auth_amount(pharmacy, False)
+            if lik == 0 and dd == 0:
+                if not messagebox.askyesno('Увага', f'Для "{pharmacy}" ТМА авторизація = 0.\nПродовжити?'):
                     return
 
-        # Build filename: (network_name)_ЗВІТ+АКТ.xlsx
-        network_name = self.pharmacy_name_var.get().strip()
-        if not network_name:
-            network_name = 'Мережа'
-        safe_name = ''.join(c for c in network_name if c.isalnum() or c in ' _-').strip()
-        default_filename = f'{safe_name}_ЗВІТ+АКТ.xlsx'
+        # Filename
+        name = pharmacy or 'Мережа'
+        safe = ''.join(c for c in name if c.isalnum() or c in ' _-').strip()
+        default = f'{safe}_ЗВІТ+АКТ.xlsx'
 
         filename = filedialog.asksaveasfilename(
             title='Зберегти звіт як',
             initialdir=str(Path.cwd()),
-            initialfile=default_filename,
+            initialfile=default,
             defaultextension='.xlsx',
-            filetypes=[('Excel файли', '*.xlsx')],
+            filetypes=[('Excel', '*.xlsx')]
         )
         if not filename:
             return
@@ -705,407 +950,29 @@ class ReportApp:
                 self._filtered_pharmacy_data(),
                 self._selected_requisites(),
                 filename,
-                period_start=start,
-                period_end=end,
+                period_start=start, period_end=end,
                 selected_pharmacy=self.pharmacy_name_var.get(),
-                mhl_df=self._filtered_mhl_data(),  # Filter MHL by current selection (match pharmacy data)
-                full_mhl_df=self.df_mhl,  # Full MHL data for DRUG_ID -> SKU mapping
-                offtake_df=self.df_tma_offtake,  # Pass TMA offtake data for sold quantities
+                mhl_df=self._filtered_mhl_data(),
+                full_mhl_df=self.df_mhl,
+                offtake_df=self.df_tma_offtake,
             )
-        except DataLoadError as error:
-            messagebox.showerror('Помилка даних', str(error))
+        except DataLoadError as e:
+            messagebox.showerror('Помилка даних', str(e))
             return
-        except (ValueError, KeyError) as error:
-            messagebox.showerror('Помилка', str(error))
+        except (ValueError, KeyError) as e:
+            messagebox.showerror('Помилка', str(e))
             return
-        except Exception as error:
-            messagebox.showerror('Несподівана помилка', f'{type(error).__name__}: {error}')
+        except Exception as e:
+            messagebox.showerror('Несподівана помилка', f'{type(e).__name__}: {e}')
             return
 
         self.status_var.set(f'Звіт збережено: {filename}')
-        messagebox.showinfo('Успіх', f'Файл успішно збережено:\n{filename}')
-
-    def classify_unknown_skus(self):
-        """Open dialog to classify unknown SKUs from MHL data."""
-        if self.df_mhl is None or self.df_mhl.empty:
-            messagebox.showwarning('Попередження', 'Спочатку завантажте дані MHL.')
-            return
-
-        # Get filtered MHL data for current network selection
-        try:
-            mhl_data = self._filtered_mhl_data()
-        except Exception as e:
-            messagebox.showerror('Помилка', f'Помилка фільтрації MHL даних: {e}')
-            return
-
-        if mhl_data is None or mhl_data.empty:
-            messagebox.showinfo('Інформація', 'Немає даних MHL для вибраної мережі.')
-            return
-
-        unknown_skus = get_unknown_skus(mhl_data)
-        if not unknown_skus:
-            messagebox.showinfo('Інформація', 'Невідомих SKU не знайдено. Усі препарати уже класифіковані.')
-            return
-
-        # Create classification dialog
-        self._show_classification_dialog(unknown_skus, mhl_data)
-
-    def _show_classification_dialog(self, unknown_skus, mhl_data):
-        """Show dialog to classify unknown SKUs."""
-        dialog = tk.Toplevel(self.root)
-        dialog.title('Класифікація невідомих SKU')
-        dialog.transient(self.root)
-        dialog.grab_set()
-        dialog.minsize(600, 400)  # Prevent squishing on Windows
-
-        # Center dialog - use after() to ensure proper sizing
-        def center_dialog():
-            dialog.update_idletasks()
-            w, h = 700, 500
-            x = (dialog.winfo_screenwidth() // 2) - (w // 2)
-            y = (dialog.winfo_screenheight() // 2) - (h // 2)
-            dialog.geometry(f'{w}x{h}+{x}+{y}')
-
-        dialog.after(1, center_dialog)
-
-        # === MAIN LAYOUT using grid ===
-        dialog.columnconfigure(0, weight=1)
-        dialog.rowconfigure(1, weight=1)  # Tree area expands
-
-        # Row 0: Instructions
-        ttk.Label(dialog, text='Оберіть категорію для кожного невідомого препарата (дефолт: ЛІК):',
-                  font=('TkDefaultFont', 10, 'bold')).grid(row=0, column=0, sticky='ew', padx=10, pady=(10, 5))
-
-        # Row 1: Tree + Scrollbars in container frame (expands)
-        tree_container = ttk.Frame(dialog)
-        tree_container.grid(row=1, column=0, sticky='nsew', padx=10, pady=5)
-        tree_container.columnconfigure(0, weight=1)
-        tree_container.rowconfigure(0, weight=1)
-
-        columns = ['SKU_UA', 'BRAND', 'Категорія']
-        tree = ttk.Treeview(tree_container, columns=columns, show='headings', height=15)
-        tree.grid(row=0, column=0, sticky='nsew')
-
-        tree.heading('SKU_UA', text='Назва препарату (SKU)')
-        tree.heading('BRAND', text='Бренд')
-        tree.heading('Категорія', text='Категорія')
-
-        tree.column('SKU_UA', width=300, minwidth=200)
-        tree.column('BRAND', width=150, minwidth=100)
-        tree.column('Категорія', width=100, minwidth=80, anchor='center')
-
-        # Scrollbars INSIDE tree_container
-        y_scroll = ttk.Scrollbar(tree_container, orient='vertical', command=tree.yview)
-        y_scroll.grid(row=0, column=1, sticky='ns')
-        tree.configure(yscrollcommand=y_scroll.set)
-
-        # Populate with unknown SKUs — default category = ЛІК
-        sku_to_brand = {}
-        for sku in unknown_skus:
-            # Get brand from MHL data
-            brand_rows = mhl_data[mhl_data['SKU_UA'] == sku]
-            brand = brand_rows['BRAND'].iloc[0] if not brand_rows.empty else 'Невідомий'
-            sku_to_brand[sku] = brand
-            tree.insert('', 'end', values=(sku, brand, 'ЛІК'), tags=(sku,))
-
-        # --- Inline combobox editor for category column ---
-        def on_tree_click(event):
-            """Open combobox on single click in Category column."""
-            region = tree.identify('region', event.x, event.y)
-            if region != 'cell':
-                return
-            column = tree.identify_column(event.x)
-            if column != '#3':  # Category column
-                return
-            item = tree.identify_row(event.y)
-            if not item:
-                return
-            _open_category_combo(tree, item)
-
-        def _open_category_combo(tree, item):
-            """Create and show combobox over the category cell."""
-            bbox = tree.bbox(item, column='#3')
-            if not bbox:
-                return
-            x, y, width, height = bbox
-            current_category = tree.item(item, 'values')[2]
-
-            combo = ttk.Combobox(tree, values=['ЛІК', 'ДД'], state='readonly', width=8)
-            combo.place(x=x, y=y, width=width, height=height)
-            combo.set(current_category if current_category in ('ЛІК', 'ДД') else 'ЛІК')
-            combo.focus_set()
-            # Auto-open dropdown
-            combo.event_generate('<Button-1>')
-
-            def on_select(event=None):
-                new_category = combo.get()
-                if new_category in ('ЛІК', 'ДД'):
-                    values = list(tree.item(item, 'values'))
-                    values[2] = new_category
-                    tree.item(item, values=values)
-                combo.destroy()
-
-            def on_focus_out(event):
-                # Small delay to allow combobox selection to register
-                dialog.after(100, combo.destroy)
-
-            combo.bind('<<ComboboxSelected>>', on_select)
-            combo.bind('<FocusOut>', on_focus_out)
-            combo.bind('<Return>', on_select)
-            combo.bind('<Escape>', lambda e: combo.destroy())
-
-        # Single click to edit category
-        tree.bind('<Button-1>', on_tree_click)
-
-        # Row 2: Buttons frame (fixed at bottom)
-        btn_frame = ttk.Frame(dialog)
-        btn_frame.grid(row=2, column=0, sticky='ew', padx=10, pady=10)
-
-        def save_all():
-            saved_count = 0
-            for item in tree.get_children():
-                values = tree.item(item, 'values')
-                sku = values[0]
-                brand = values[1]
-                category = values[2]
-                if category and category in ('ЛІК', 'ДД'):
-                    if save_sku_classification(sku, brand, category):
-                        saved_count += 1
-            if saved_count > 0:
-                messagebox.showinfo('Успіх', f'Збережено класифікацій: {saved_count}')
-                dialog.destroy()
-            else:
-                messagebox.showwarning('Попередження', 'Не обрано категорію для жодного препарату.')
-
-        ttk.Button(btn_frame, text='Зберегти всі', command=save_all).pack(side='right', padx=5)
-        ttk.Button(btn_frame, text='Скасувати', command=dialog.destroy).pack(side='right', padx=5)
-
-        # Focus tree for keyboard navigation
-        tree.focus_set()
-
-    def manage_sku_active(self):
-        """Open dialog to manage SKU active status (include in calculations or not)."""
-        dialog = tk.Toplevel(self.root)
-        dialog.title('Управління активністю SKU')
-        dialog.transient(self.root)
-        dialog.grab_set()
-        dialog.minsize(800, 500)  # Prevent squishing on Windows
-
-        # Center dialog - use after() to ensure proper sizing
-        def center_dialog():
-            dialog.update_idletasks()
-            w, h = 900, 600
-            x = (dialog.winfo_screenwidth() // 2) - (w // 2)
-            y = (dialog.winfo_screenheight() // 2) - (h // 2)
-            dialog.geometry(f'{w}x{h}+{x}+{y}')
-
-        dialog.after(1, center_dialog)
-
-        # Load all SKUs with status
-        try:
-            all_skus = get_all_skus_with_status()
-        except Exception as e:
-            messagebox.showerror('Помилка', f'Не вдалося завантажити SKU: {e}')
-            dialog.destroy()
-            return
-
-        if all_skus.empty:
-            messagebox.showinfo('Інформація', 'Список SKU порожній.')
-            dialog.destroy()
-            return
-
-        # === MAIN LAYOUT using grid for predictable positioning ===
-        dialog.columnconfigure(0, weight=1)
-        dialog.rowconfigure(2, weight=1)  # Tree area expands
-
-        # Row 0: Instructions
-        ttk.Label(dialog, text='Керуйте активністю SKU — неактивні SKU не беруть участь у розрахунках MHL та звітах.\n'
-                  'Подвійний клік по рядку / Пробел / кнопка «Переключити» — змінити статус.',
-                  font=('TkDefaultFont', 10, 'bold')).grid(row=0, column=0, sticky='ew', padx=10, pady=(10, 5))
-
-        # Row 1: Search/Filter frame
-        search_frame = ttk.Frame(dialog)
-        search_frame.grid(row=1, column=0, sticky='ew', padx=10, pady=5)
-        search_frame.columnconfigure(1, weight=1)  # Search entry expands
-
-        ttk.Label(search_frame, text='Пошук:').grid(row=0, column=0, padx=(0, 5), sticky='w')
-        search_var = tk.StringVar()
-        search_entry = ttk.Entry(search_frame, textvariable=search_var, width=40)
-        search_entry.grid(row=0, column=1, padx=(0, 10), sticky='ew')
-
-        ttk.Label(search_frame, text='Категорія:').grid(row=0, column=2, padx=(10, 5), sticky='w')
-        cat_var = tk.StringVar(value='Всі')
-        cat_combo = ttk.Combobox(search_frame, textvariable=cat_var, values=['Всі', 'ЛІК', 'ДД'], state='readonly', width=10)
-        cat_combo.grid(row=0, column=3, padx=(0, 10), sticky='w')
-
-        ttk.Label(search_frame, text='Статус:').grid(row=0, column=4, padx=(10, 5), sticky='w')
-        status_var = tk.StringVar(value='Всі')
-        status_combo = ttk.Combobox(search_frame, textvariable=status_var, values=['Всі', 'Активні', 'Неактивні'], state='readonly', width=12)
-        status_combo.grid(row=0, column=5, padx=(0, 10), sticky='w')
-
-        # Row 2: Tree + Scrollbars in a container frame (expands)
-        tree_container = ttk.Frame(dialog)
-        tree_container.grid(row=2, column=0, sticky='nsew', padx=10, pady=5)
-        tree_container.columnconfigure(0, weight=1)
-        tree_container.rowconfigure(0, weight=1)
-
-        columns = ['SKU_UA', 'BRAND', 'CATEGORY', 'ACTIVE']
-        tree = ttk.Treeview(tree_container, columns=columns, show='headings', height=20, selectmode='browse')
-        tree.grid(row=0, column=0, sticky='nsew')
-
-        tree.heading('SKU_UA', text='Назва препарату (SKU)')
-        tree.heading('BRAND', text='Бренд')
-        tree.heading('CATEGORY', text='Категорія')
-        tree.heading('ACTIVE', text='Активний')
-
-        tree.column('SKU_UA', width=350, minwidth=250)
-        tree.column('BRAND', width=180, minwidth=120)
-        tree.column('CATEGORY', width=80, minwidth=60, anchor='center')
-        tree.column('ACTIVE', width=80, minwidth=60, anchor='center')
-
-        # Scrollbars INSIDE tree_container (not on dialog)
-        y_scroll = ttk.Scrollbar(tree_container, orient='vertical', command=tree.yview)
-        y_scroll.grid(row=0, column=1, sticky='ns')
-        x_scroll = ttk.Scrollbar(tree_container, orient='horizontal', command=tree.xview)
-        x_scroll.grid(row=1, column=0, sticky='ew')
-        tree.configure(yscrollcommand=y_scroll.set, xscrollcommand=x_scroll.set)
-
-        # Row 3: Buttons frame (fixed at bottom, never pushed out)
-        btn_frame = ttk.Frame(dialog)
-        btn_frame.grid(row=3, column=0, sticky='ew', padx=10, pady=10)
-
-        # Store reference to data for filtering
-        self._sku_all_data = all_skus
-
-        def populate_tree(filter_text='', filter_cat='Всі', filter_status='Всі'):
-            """Populate tree with filtered data."""
-            tree.delete(*tree.get_children())
-            filter_text = filter_text.strip().casefold()
-
-            for _, row in all_skus.iterrows():
-                sku = str(row['SKU_UA'])
-                brand = str(row['BRAND'])
-                cat = str(row['CATEGORY'])
-                active = bool(row['active'])
-
-                # Apply filters
-                if filter_text and filter_text not in sku.casefold() and filter_text not in brand.casefold():
-                    continue
-                if filter_cat != 'Всі' and cat != filter_cat:
-                    continue
-                if filter_status == 'Активні' and not active:
-                    continue
-                if filter_status == 'Неактивні' and active:
-                    continue
-
-                active_str = '✓' if active else '✗'
-                tree.insert('', 'end', values=(sku, brand, cat, active_str), tags=(sku,))
-
-        # Initial populate
-        populate_tree()
-
-        # Filter functions
-        def on_search_change(*_):
-            populate_tree(search_var.get(), cat_var.get(), status_var.get())
-
-        def on_cat_change(*_):
-            populate_tree(search_var.get(), cat_var.get(), status_var.get())
-
-        def on_status_change(*_):
-            populate_tree(search_var.get(), cat_var.get(), status_var.get())
-
-        search_var.trace_add('write', on_search_change)
-        cat_var.trace_add('write', on_cat_change)
-        status_var.trace_add('write', on_status_change)
-
-        # --- Toggle active status ---
-        def toggle_selected_sku():
-            """Toggle active status for currently selected SKU."""
-            selection = tree.selection()
-            if not selection:
-                return
-            item = selection[0]
-            sku = tree.item(item, 'values')[0]
-            _do_toggle(sku)
-
-        def _do_toggle(sku):
-            row = all_skus[all_skus['SKU_UA'] == sku]
-            if row.empty:
-                return
-            current_active = bool(row.iloc[0]['active'])
-            new_active = not current_active
-
-            if set_sku_active(sku, new_active):
-                idx = all_skus.index[all_skus['SKU_UA'] == sku]
-                if len(idx) > 0:
-                    all_skus.loc[idx[0], 'active'] = new_active
-                # Re-populate preserving selection position
-                populate_tree(search_var.get(), cat_var.get(), status_var.get())
-                self.status_var.set(f'Оновлено статус SKU: {sku} → {"Активний" if new_active else "Неактивний"}')
-            else:
-                messagebox.showerror('Помилка', f'Не вдалося оновити статус для {sku}')
-
-        # Double-click on row to toggle
-        def on_double_click(event):
-            toggle_selected_sku()
-
-        # Space key to toggle focused/selected row
-        def on_space(event):
-            toggle_selected_sku()
-            return 'break'  # prevent default space behavior (scroll)
-
-        tree.bind('<Double-1>', on_double_click)
-        tree.bind('<space>', on_space)
-        # Also allow Enter key
-        tree.bind('<Return>', on_space)
-
-        # Button callbacks
-        def select_all_active():
-            """Set all visible SKUs to active."""
-            visible_skus = [tree.item(item, 'values')[0] for item in tree.get_children()]
-            count = 0
-            for sku in visible_skus:
-                if set_sku_active(sku, True):
-                    idx = all_skus.index[all_skus['SKU_UA'] == sku]
-                    if len(idx) > 0:
-                        all_skus.loc[idx[0], 'active'] = True
-                    count += 1
-            populate_tree(search_var.get(), cat_var.get(), status_var.get())
-            self.status_var.set(f'Активовано SKU: {count}')
-
-        def select_all_inactive():
-            """Set all visible SKUs to inactive."""
-            visible_skus = [tree.item(item, 'values')[0] for item in tree.get_children()]
-            count = 0
-            for sku in visible_skus:
-                if set_sku_active(sku, False):
-                    idx = all_skus.index[all_skus['SKU_UA'] == sku]
-                    if len(idx) > 0:
-                        all_skus.loc[idx[0], 'active'] = False
-                    count += 1
-            populate_tree(search_var.get(), cat_var.get(), status_var.get())
-            self.status_var.set(f'Деактивовано SKU: {count}')
-
-        ttk.Button(btn_frame, text='Переключити виділене', command=toggle_selected_sku).pack(side='left', padx=5)
-        ttk.Button(btn_frame, text='Активувати видимі', command=select_all_active).pack(side='left', padx=5)
-        ttk.Button(btn_frame, text='Деактивувати видимі', command=select_all_inactive).pack(side='left', padx=5)
-        ttk.Button(btn_frame, text='Закрити', command=dialog.destroy).pack(side='right', padx=5)
-
-        # Ensure tree gets focus AFTER dialog is mapped
-        def set_focus():
-            tree.focus_set()
-            # Select first item if any
-            children = tree.get_children()
-            if children:
-                tree.selection_set(children[0])
-                tree.see(children[0])
-
-        dialog.after(100, set_focus)
+        messagebox.showinfo('Успіх', f'Файл збережено:\n{filename}')
 
 
 def main():
     root = tk.Tk()
-    ReportApp(root)
+    app = ReportApp(root)
     root.mainloop()
 
 
