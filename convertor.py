@@ -1432,7 +1432,8 @@ def create_empty_tma_sheet(ws, is_lic=True):
 
 def generate_excel_report(
         df,
-        df_req,
+        df_req_lik,
+        df_req_dd,
         output_filename='marketing_report.xlsx',
         period_start=None,
         period_end=None,
@@ -1501,20 +1502,20 @@ def generate_excel_report(
         period_str = period_start
         period_end_ukrainian = period_end
 
-    # Contractor details (from config, can be overridden by requisites file)
-    contract_no = DEFAULT_CONTRACT_NO
-    contract_date = DEFAULT_CONTRACT_DATE
-    executor_name = DEFAULT_EXECUTOR_NAME
+    # Helper to extract contract details from requisites
+    def _extract_contract_details(df_req, pharmacy_name):
+        """Extract executor_name, contract_no, contract_date from requisites for a pharmacy."""
+        if df_req is None or df_req.empty:
+            return DEFAULT_EXECUTOR_NAME, DEFAULT_CONTRACT_NO, DEFAULT_CONTRACT_DATE
 
-    if df_req is not None and not df_req.empty:
-        matched_row = None
-        clean_selected = str(selected_pharmacy).strip()
+        clean_selected = str(pharmacy_name).strip()
         target_col = None
         for col_candidate in ['chain_name', 'Клиент из базы данных', 'Мережа', 'Назва']:
             if col_candidate in df_req.columns:
                 target_col = col_candidate
                 break
 
+        matched_row = None
         if clean_selected and clean_selected != 'Усі аптеки' and target_col:
             filtered_req = df_req[
                 df_req[target_col].astype(str).str.strip().str.lower()
@@ -1526,11 +1527,16 @@ def generate_excel_report(
         if matched_row is None:
             matched_row = df_req.iloc[0]
 
-        executor_name = str(
-            matched_row.get('Виконавець', matched_row.get('Юридическое лицо', executor_name))
+        executor = str(
+            matched_row.get('Виконавець', matched_row.get('Юридическое лицо', DEFAULT_EXECUTOR_NAME))
         )
-        contract_no = str(matched_row.get('№ договора', contract_no))
-        contract_date = str(matched_row.get('Дата договора', contract_date))
+        contract_no = str(matched_row.get('№ договора', DEFAULT_CONTRACT_NO))
+        contract_date = str(matched_row.get('Дата договора', DEFAULT_CONTRACT_DATE))
+        return executor, contract_no, contract_date
+
+    # Extract contract details separately for ЛИК and ДД
+    executor_lik, contract_no_lik, contract_date_lik = _extract_contract_details(df_req_lik, selected_pharmacy)
+    executor_dd, contract_no_dd, contract_date_dd = _extract_contract_details(df_req_dd, selected_pharmacy)
 
     import openpyxl
     wb = openpyxl.Workbook()
@@ -1542,16 +1548,16 @@ def generate_excel_report(
     ws_akt_lik = wb.create_sheet(title='акт_ЛІК')
     generate_act_sheet(
         ws=ws_akt_lik,
-        df_req=df_req,
+        df_req=df_req_lik,
         service1_sum=service1_lik,
         service2_sum=service2_lik,
         period_start=period_start,
         period_end=period_end,
         selected_pharmacy=selected_pharmacy,
         act_number='1',
-        contract_no=contract_no,
-        contract_date=contract_date,
-        executor_name=executor_name,
+        contract_no=contract_no_lik,
+        contract_date=contract_date_lik,
+        executor_name=executor_lik,
         is_lic=True
     )
 
@@ -1561,16 +1567,16 @@ def generate_excel_report(
     ws_akt_dd = wb.create_sheet(title='акт_ДД')
     generate_act_sheet(
         ws=ws_akt_dd,
-        df_req=df_req,
+        df_req=df_req_dd,
         service1_sum=service1_dd,
         service2_sum=service2_dd,
         period_start=period_start,
         period_end=period_end,
         selected_pharmacy=selected_pharmacy,
         act_number='2',
-        contract_no=contract_no,
-        contract_date=contract_date,
-        executor_name=executor_name,
+        contract_no=contract_no_dd,
+        contract_date=contract_date_dd,
+        executor_name=executor_dd,
         is_lic=False
     )
 
@@ -1580,9 +1586,9 @@ def generate_excel_report(
     ws_zvit_lik = wb.create_sheet(title='звіт викладка+MHL(ЛІК)')
     fill_zvit_worksheet(ws_zvit_lik, pivot_lik, LIK_BRANDS_TEMPLATE, period_str,
                         period_end_ukrainian,
-                        executor_name, contract_no, contract_date,
+                        executor_lik, contract_no_lik, contract_date_lik,
                         service1_lik, service2_lik, is_lic=True, mhl_df=mhl_df,
-                        df_req=df_req, selected_pharmacy=selected_pharmacy)
+                        df_req=df_req_lik, selected_pharmacy=selected_pharmacy)
 
     # ============================================================
     # SHEET 4: звіт викладка+MHL(ДД)
@@ -1590,9 +1596,9 @@ def generate_excel_report(
     ws_zvit_dd = wb.create_sheet(title='звіт викладка+MHL(ДД)')
     fill_zvit_worksheet(ws_zvit_dd, pivot_dd, DD_BRANDS_TEMPLATE, period_str,
                         period_end_ukrainian,
-                        executor_name, contract_no, contract_date,
+                        executor_dd, contract_no_dd, contract_date_dd,
                         service1_dd, service2_dd, is_lic=False, mhl_df=mhl_df,
-                        df_req=df_req, selected_pharmacy=selected_pharmacy)
+                        df_req=df_req_dd, selected_pharmacy=selected_pharmacy)
 
     # ============================================================
     # SHEET 5: під час акції (ЛІК) — full TMA report
@@ -1603,14 +1609,14 @@ def generate_excel_report(
         template_brands=LIK_BRANDS_TEMPLATE,
         period_start=period_start,
         period_end=period_end,
-        executor_name=executor_name,
-        contract_no=contract_no,
-        contract_date=contract_date,
+        executor_name=executor_lik,
+        contract_no=contract_no_lik,
+        contract_date=contract_date_lik,
         selected_pharmacy=selected_pharmacy,
         mhl_df=mhl_df,
         full_mhl_df=full_mhl_df,
         is_lic=True,
-        df_req=df_req,
+        df_req=df_req_lik,
         offtake_df=offtake_df
     )
 
@@ -1623,14 +1629,14 @@ def generate_excel_report(
         template_brands=DD_BRANDS_TEMPLATE,
         period_start=period_start,
         period_end=period_end,
-        executor_name=executor_name,
-        contract_no=contract_no,
-        contract_date=contract_date,
+        executor_name=executor_dd,
+        contract_no=contract_no_dd,
+        contract_date=contract_date_dd,
         selected_pharmacy=selected_pharmacy,
         mhl_df=mhl_df,
         full_mhl_df=full_mhl_df,
         is_lic=False,
-        df_req=df_req,
+        df_req=df_req_dd,
         offtake_df=offtake_df
     )
 
@@ -1640,15 +1646,15 @@ def generate_excel_report(
     ws_akt_tma_lik = wb.create_sheet(title='АКТ_ТМА_ЛІК')
     generate_tma_act_sheet(
         ws=ws_akt_tma_lik,
-        df_req=df_req,
+        df_req=df_req_lik,
         tma_subtotal_no_vat=tma_lik_amounts['subtotal_no_vat'] if tma_lik_amounts else 0,
         period_start=period_start,
         period_end=period_end,
         selected_pharmacy=selected_pharmacy,
         act_number='3',
-        contract_no=contract_no,
-        contract_date=contract_date,
-        executor_name=executor_name,
+        contract_no=contract_no_lik,
+        contract_date=contract_date_lik,
+        executor_name=executor_lik,
         is_lic=True
     )
 
@@ -1658,15 +1664,15 @@ def generate_excel_report(
     ws_akt_tma_dd = wb.create_sheet(title='АКТ_ТМА_ДД')
     generate_tma_act_sheet(
         ws=ws_akt_tma_dd,
-        df_req=df_req,
+        df_req=df_req_dd,
         tma_subtotal_no_vat=tma_dd_amounts['subtotal_no_vat'] if tma_dd_amounts else 0,
         period_start=period_start,
         period_end=period_end,
         selected_pharmacy=selected_pharmacy,
         act_number='4',
-        contract_no=contract_no,
-        contract_date=contract_date,
-        executor_name=executor_name,
+        contract_no=contract_no_dd,
+        contract_date=contract_date_dd,
+        executor_name=executor_dd,
         is_lic=False
     )
 

@@ -550,7 +550,7 @@ class ReportApp:
     def __init__(self, root):
         self.root = root
         self.root.title('Генератор маркетингових звітів та актів')
-        self.root.geometry('850x600')
+        self.root.geometry('850x650')
         self.root.minsize(750, 550)
         self.root.configure(bg=BG_COLOR)
 
@@ -558,12 +558,14 @@ class ReportApp:
         self.df = None
         self.df_mhl = None
         self.df_tma_offtake = None
-        self.df_req = None
+        self.df_req_lik = None
+        self.df_req_dd = None
         self.loaded_period = None
         self.loading = False
 
         # UI variables
-        self.requisites_file_var = tk.StringVar(value='')
+        self.requisites_lik_var = tk.StringVar(value='')
+        self.requisites_dd_var = tk.StringVar(value='')
         self.pharmacy_name_var = tk.StringVar(value='')
         self.year_var = tk.StringVar(value=str(datetime.now().year))
         self.month_var = tk.StringVar(value=f'{datetime.now().month:02d}')
@@ -573,15 +575,54 @@ class ReportApp:
 
         self._build_ui()
 
+        # Update pharmacy combo after UI is built
+        self._update_pharmacy_combo()
+
     def _auto_detect_requisites(self):
-        found = _find_requisites_file()
-        if found:
+        """Auto-detect separate requisites files for ЛИК and ДД."""
+        root = Path(__file__).resolve().parent
+        # Look for ЛИК requisites
+        lik_patterns = ['реквізити*лік*', 'реквізити*лик*', 'requisites*lik*', 'requisites*lic*']
+        dd_patterns = ['реквізити*дд*', 'реквізити*dd*', 'requisites*dd*']
+
+        def find_file(patterns):
+            for pattern in patterns:
+                matches = list(root.glob(f'{pattern}.*'))
+                for m in matches:
+                    if m.suffix.lower() in ('.xlsx', '.xls', '.csv'):
+                        return m
+            return None
+
+        # Try to find ЛИК file
+        lik_file = find_file(lik_patterns)
+        if lik_file:
             try:
-                self.df_req = load_requisites_file(found)
-                self.requisites_file_var.set(found.name)
-                self._update_pharmacy_combo()
+                self.df_req_lik = load_requisites_file(lik_file)
+                self.requisites_lik_var.set(lik_file.name)
             except Exception:
                 pass
+
+        # Try to find ДД file
+        dd_file = find_file(dd_patterns)
+        if dd_file:
+            try:
+                self.df_req_dd = load_requisites_file(dd_file)
+                self.requisites_dd_var.set(dd_file.name)
+            except Exception:
+                pass
+
+        # Fallback: if no separate files found, try generic requisites file
+        if not lik_file and not dd_file:
+            found = _find_requisites_file()
+            if found:
+                try:
+                    df_req = load_requisites_file(found)
+                    self.df_req_lik = df_req
+                    self.df_req_dd = df_req
+                    self.requisites_lik_var.set(found.name + ' (спільний)')
+                    self.requisites_dd_var.set(found.name + ' (спільний)')
+                except Exception:
+                    pass
 
     def _build_ui(self):
         self.root.columnconfigure(0, weight=1)
@@ -603,22 +644,35 @@ class ReportApp:
         ModernButton(header, text='⚙️ Налаштування', style='outline',
                     command=self.open_settings).grid(row=0, column=2, sticky='e')
 
-        # --- Requisites Card ---
+        # --- Requisites Card (separate for ЛИК and ДД) ---
         req_card = Card(main, padx=20, pady=16)
         req_card.grid(row=1, column=0, sticky='ew', pady=(0, 16))
         req_card.columnconfigure(1, weight=1)
 
-        tk.Label(req_card, text='Файл реквізитів',
+        tk.Label(req_card, text='Файли реквізитів',
                 font=FONT_SUBTITLE, bg=SURFACE, fg=TEXT_MAIN).grid(row=0, column=0, columnspan=3, sticky='w', pady=(0, 8))
 
-        self.req_entry = tk.Entry(req_card, textvariable=self.requisites_file_var,
-                                 font=FONT_BODY, state='readonly',
-                                 readonlybackground=SURFACE, relief='solid', bd=1,
-                                 highlightthickness=1, highlightcolor=BORDER_FOCUS, highlightbackground=BORDER)
-        self.req_entry.grid(row=1, column=0, columnspan=2, sticky='ew', padx=(0, 10))
+        # ЛИК requisites
+        tk.Label(req_card, text='ЛІК:', font=FONT_BODY, bg=SURFACE, fg=TEXT_MAIN).grid(row=1, column=0, sticky='w', padx=(0, 10), pady=(0, 4))
+        self.req_lik_entry = tk.Entry(req_card, textvariable=self.requisites_lik_var,
+                                       font=FONT_BODY, state='readonly',
+                                       readonlybackground=SURFACE, relief='solid', bd=1,
+                                       highlightthickness=1, highlightcolor=BORDER_FOCUS, highlightbackground=BORDER)
+        self.req_lik_entry.grid(row=1, column=1, sticky='ew', padx=(0, 10), pady=(0, 4))
 
-        ModernButton(req_card, text='Обрати файл...', style='outline',
-                    command=self.select_requisites_file).grid(row=1, column=2, sticky='e')
+        ModernButton(req_card, text='Обрати...', style='outline',
+                    command=lambda: self.select_requisites_file('lik')).grid(row=1, column=2, sticky='e', pady=(0, 4))
+
+        # ДД requisites
+        tk.Label(req_card, text='ДД:', font=FONT_BODY, bg=SURFACE, fg=TEXT_MAIN).grid(row=2, column=0, sticky='w', padx=(0, 10), pady=(0, 4))
+        self.req_dd_entry = tk.Entry(req_card, textvariable=self.requisites_dd_var,
+                                      font=FONT_BODY, state='readonly',
+                                      readonlybackground=SURFACE, relief='solid', bd=1,
+                                      highlightthickness=1, highlightcolor=BORDER_FOCUS, highlightbackground=BORDER)
+        self.req_dd_entry.grid(row=2, column=1, sticky='ew', padx=(0, 10), pady=(0, 4))
+
+        ModernButton(req_card, text='Обрати...', style='outline',
+                    command=lambda: self.select_requisites_file('dd')).grid(row=2, column=2, sticky='e', pady=(0, 4))
 
         # --- Pharmacy Selection ---
         pharm_card = Card(main, padx=20, pady=16)
@@ -702,8 +756,6 @@ class ReportApp:
         if pharmacy:
             lik = get_tma_auth_amount(pharmacy, True)
             dd = get_tma_auth_amount(pharmacy, False)
-            self.tma_auth_lik_var.set(f'{lik:.2f}')
-            self.tma_auth_dd_var.set(f'{dd:.2f}')
             self.tma_auth_preview.config(text=f'ТМА: ЛІК {lik:.2f} / ДД {dd:.2f}')
         else:
             self.tma_auth_preview.config(text='ТМА: виберіть мережу')
@@ -723,41 +775,57 @@ class ReportApp:
     def _validate_period(self):
         return self._get_period_range()
 
-    def select_requisites_file(self):
+    def select_requisites_file(self, category):
+        """Select requisites file for ЛИК or ДД."""
+        title = 'Виберіть файл реквізитів для ЛІК' if category == 'lik' else 'Виберіть файл реквізитів для ДД'
         filename = filedialog.askopenfilename(
-            title='Виберіть файл реквізитів',
+            title=title,
             initialdir=str(Path.cwd()),
             filetypes=[('Усі таблиці', '*.csv *.xlsx *.xls'), ('CSV', '*.csv'), ('Excel', '*.xlsx *.xls')]
         )
         if not filename:
             return
         try:
-            self.df_req = load_requisites_file(filename)
-            if self.df_req.empty:
+            df_req = load_requisites_file(filename)
+            if df_req.empty:
                 raise ValueError('Файл реквізитів порожній.')
         except (OSError, ValueError, UnicodeError) as e:
             messagebox.showerror('Помилка', str(e))
             return
 
-        self.requisites_file_var.set(Path(filename).name)
+        if category == 'lik':
+            self.df_req_lik = df_req
+            self.requisites_lik_var.set(Path(filename).name)
+        else:
+            self.df_req_dd = df_req
+            self.requisites_dd_var.set(Path(filename).name)
+
         self._update_pharmacy_combo()
 
     def _update_pharmacy_combo(self):
-        if self.df_req is None or self.df_req.empty:
-            return
-        target_col = None
-        for col in ['chain_name', 'Клиент из базы данных', 'Мережа', 'Назва']:
-            if col in self.df_req.columns:
-                target_col = col
-                break
-        if target_col:
-            chains = self.df_req[target_col].dropna().astype(str).str.strip()
-            unique = sorted(c for c in chains.unique() if c and c.lower() != 'nan')
+        """Update pharmacy combo with chains from both requisites files."""
+        all_chains = set()
+        for df_req in [self.df_req_lik, self.df_req_dd]:
+            if df_req is None or df_req.empty:
+                continue
+            target_col = None
+            for col in ['chain_name', 'Клиент из базы данных', 'Мережа', 'Назва']:
+                if col in df_req.columns:
+                    target_col = col
+                    break
+            if target_col:
+                chains = df_req[target_col].dropna().astype(str).str.strip()
+                all_chains.update(c for c in chains.unique() if c and c.lower() != 'nan')
+
+        if all_chains:
+            unique = sorted(all_chains)
             self.pharmacy_combo['values'] = tuple(unique)
-            if unique:
-                self.pharmacy_combo.current(0)
-                self._load_tma_auth()
+            self.pharmacy_combo.current(0)
+            self._load_tma_auth()
             self.status_var.set(f'Завантажено мереж: {len(unique)}')
+        else:
+            self.pharmacy_combo['values'] = ()
+            self.status_var.set('Реквізити не завантажені')
 
     def _filtered_pharmacy_data(self):
         if self.df is None or self.df.empty:
@@ -909,9 +977,10 @@ class ReportApp:
         return report
 
     def _selected_requisites(self):
-        if self.df_req is None or self.df_req.empty:
-            raise ValueError('Оберіть файл реквізитів!')
-        return self.df_req
+        """Validate that at least one requisites file is loaded."""
+        if (self.df_req_lik is None or self.df_req_lik.empty) and (self.df_req_dd is None or self.df_req_dd.empty):
+            raise ValueError('Оберіть файли реквізитів для ЛІК та/або ДД!')
+        return self.df_req_lik, self.df_req_dd
 
     def download(self):
         try:
@@ -946,9 +1015,11 @@ class ReportApp:
 
         try:
             start, end = self._validate_period()
+            df_req_lik, df_req_dd = self._selected_requisites()
             generate_excel_report(
                 self._filtered_pharmacy_data(),
-                self._selected_requisites(),
+                df_req_lik,
+                df_req_dd,
                 filename,
                 period_start=start, period_end=end,
                 selected_pharmacy=self.pharmacy_name_var.get(),
