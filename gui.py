@@ -1087,7 +1087,11 @@ class ReportApp:
                     command=self.download).pack(side='left', padx=(0, 10))
 
         ModernButton(actions, text='👁 Попередній перегляд', style='secondary',
-                    command=self.preview).pack(side='left')
+                    command=self.preview).pack(side='left', padx=(0, 10))
+
+        # Debug button
+        ModernButton(actions, text='🔍 Бренди MHL', style='outline',
+                    command=self._show_mhl_brands).pack(side='right')
 
         # --- Status Bar (no progress bar) ---
         self.status_var = tk.StringVar(value='Готово до роботи')
