@@ -158,42 +158,9 @@ def _init_legacy_sku_lists():
         MHL_DD_SKU = get_mhl_dd_sku()
 
 
-def save_sku_classification(sku_name, brand, category, active=True):
-    """Add or update a SKU classification in the CSV file."""
-    import pandas as pd
-    import csv
-
-    global _sku_classification_cache, _sku_to_category, _sku_to_brand
-
-    load_sku_classification()  # Ensure cache is loaded
-
-    normalized = str(sku_name).strip().casefold()
-    new_row = {
-        'SKU_UA': str(sku_name).strip(),
-        'BRAND': str(brand).strip(),
-        'CATEGORY': str(category).strip(),
-        'active': bool(active)
-    }
-
-    # Update cache
-    if normalized in _sku_to_category:
-        # Update existing
-        idx = _sku_classification_cache[_sku_classification_cache['SKU_NORMALIZED'] == normalized].index
-        if len(idx) > 0:
-            _sku_classification_cache.loc[idx[0], 'SKU_UA'] = new_row['SKU_UA']
-            _sku_classification_cache.loc[idx[0], 'BRAND'] = new_row['BRAND']
-            _sku_classification_cache.loc[idx[0], 'CATEGORY'] = new_row['CATEGORY']
-            _sku_classification_cache.loc[idx[0], 'active'] = new_row['active']
-    else:
-        # Add new
-        new_row['SKU_NORMALIZED'] = normalized
-        _sku_classification_cache = pd.concat([_sku_classification_cache, pd.DataFrame([new_row])], ignore_index=True)
-
-    return _save_and_update()
-
-
 def _save_classification_cache():
     """Thread-safe save of classification cache to CSV."""
+    import csv
     with _sku_classification_lock:
         # Use lock file for cross-process safety
         lock_acquired = False
@@ -219,6 +186,21 @@ def _save_classification_cache():
                     SKU_CLASSIFICATION_LOCK_FILE.unlink()
                 except Exception:
                     pass
+
+
+def _update_lookups():
+    """Rebuild lookup dictionaries from the classification cache."""
+    global _sku_to_category, _sku_to_brand, _sku_classification_cache
+
+    if _sku_classification_cache is None or _sku_classification_cache.empty:
+        _sku_to_category = {}
+        _sku_to_brand = {}
+        return
+
+    # Only active SKUs are used for lookups
+    active_df = _sku_classification_cache[_sku_classification_cache['active']]
+    _sku_to_category = dict(zip(active_df['SKU_NORMALIZED'], active_df['CATEGORY']))
+    _sku_to_brand = dict(zip(active_df['SKU_NORMALIZED'], active_df['BRAND']))
 
 
 # Save to CSV with quoting for consistency (thread-safe)
