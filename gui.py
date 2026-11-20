@@ -203,6 +203,7 @@ class SettingsDialog(tk.Toplevel):
         toolbar.pack(fill='x', pady=(0, 8))
 
         ModernButton(toolbar, text='➕ Додати SKU', style='primary', command=self._add_sku).pack(side='left', padx=(0, 8))
+        ModernButton(toolbar, text='🔄 Синхронізувати з БД', style='success', command=self._sync_skus_from_db).pack(side='left', padx=(0, 8))
         ModernButton(toolbar, text='🔄 Оновити', style='secondary', command=self._refresh_sku_table).pack(side='left')
 
         # Info label
@@ -256,6 +257,236 @@ class SettingsDialog(tk.Toplevel):
             ), tags=(active_tag,))
         self.sku_tree.tag_configure('active', foreground=SUCCESS)
         self.sku_tree.tag_configure('inactive', foreground=DANGER)
+
+    def _sync_skus_from_db(self):
+        """Sync unknown SKUs from loaded MHL data into classification."""
+        if self.df_mhl is None or self.df_mhl.empty:
+            messagebox.showinfo('Синхронізація', 'Спочатку завантажте дані (МХЛ) для пошуку нових SKU.', parent=self)
+            return
+
+        from convertor import get_unknown_skus_with_brands, bulk_import_unknown_skus
+
+        # Get unknown SKUs with brands
+        unknown_df = get_unknown_skus_with_brands(self.df_mhl)
+
+        if unknown_df.empty:
+            messagebox.showinfo('Синхронізація', 'Нових SKU для імпорту не знайдено.', parent=self)
+            return
+
+        # Show preview dialog
+        self._show_sync_preview_dialog(unknown_df)
+
+    def _show_sync_preview_dialog(self, unknown_df):
+        """Show dialog to preview and confirm SKU import."""
+        dialog = tk.Toplevel(self)
+        dialog.title('Синхронізація SKU з БД')
+        dialog.geometry('700x500')
+        dialog.configure(bg=BG_COLOR)
+        dialog.transient(self)
+        dialog.grab_set()
+
+        # Center on parent
+        dialog.update_idletasks()
+        x = self.winfo_rootx() + (self.winfo_width() - dialog.winfo_width()) // 2
+        y = self.winfo_rooty() + (self.winfo_height() - dialog.winfo_height()) // 2
+        dialog.geometry(f'+{x}+{y}')
+
+        # Header
+        header_frame = tk.Frame(dialog, bg=BG_COLOR)
+        header_frame.pack(fill='x', padx=PAD_X, pady=PAD_Y)
+
+        tk.Label(header_frame,
+                 text=f'Знайдено {len(unknown_df)} нових SKU в базі даних',
+                 font=FONT_SUBTITLE, bg=BG_COLOR, fg=TEXT_MAIN).pack(anchor='w')
+
+        tk.Label(header_frame,
+                 text='Перевірте та відредагуйте класифікацію перед імпортом:',
+                 font=FONT_SMALL, bg=BG_COLOR, fg=TEXT_MUTED).pack(anchor='w', pady=(4, 0))
+
+        # Table
+        table_frame = tk.Frame(dialog, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
+        table_frame.pack(fill='both', expand=True, padx=PAD_X, pady=(0, PAD_X))
+
+        columns = ('SKU_UA', 'BRAND', 'CATEGORY', 'ACTIVE')
+        sync_tree = ttk.Treeview(table_frame, columns=columns, show='headings', selectmode='extended')
+
+        col_config = {
+            'SKU_UA': ('SKU / Назва', 250),
+            'BRAND': ('Бренд', 150),
+            'CATEGORY': ('Категорія', 100),
+            'ACTIVE': ('Активний', 80),
+        }
+        for col, (title, width) in col_config.items():
+            sync_tree.heading(col, text=title)
+            sync_tree.column(col, width=width, anchor='w' if col != 'ACTIVE' else 'center')
+
+        vsb = ttk.Scrollbar(table_frame, orient='vertical', command=sync_tree.yview)
+        hsb = ttk.Scrollbar(table_frame, orient='horizontal', command=sync_tree.xview)
+        sync_tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+
+        sync_tree.grid(row=0, column=0, sticky='nsew')
+        vsb.grid(row=0, column=1, sticky='ns')
+        hsb.grid(row=1, column=0, sticky='ew')
+        table_frame.grid_rowconfigure(0, weight=1)
+        table_frame.grid_columnconfigure(0, weight=1)
+
+        # Populate with unknown SKUs - auto-classify
+        from convertor import auto_classify_sku
+        for _, row in unknown_df.iterrows():
+            sku = row['SKU_UA']
+            brand = row['BRAND']
+            category, confidence = auto_classify_sku(sku, brand)
+            if not category:
+                category = 'ЛІК'  # default
+            active = confidence >= 0.7
+            active_text = '✓' if active else '✗'
+            tags = ('auto',) if active else ('manual',)
+            sync_tree.insert('', 'end', values=(sku, brand, category, active_text), tags=tags)
+
+        sync_tree.tag_configure('auto', foreground=SUCCESS)
+        sync_tree.tag_configure('manual', foreground=WARNING)
+
+        # Double-click to edit
+        def on_double_click(event):
+            item = sync_tree.selection()[0] if sync_tree.selection() else None
+            if not item:
+                return
+            values = sync_tree.item(item, 'values')
+            self._edit_sync_sku_dialog(sync_tree, item, values)
+
+        sync_tree.bind('<Double-1>', on_double_click)
+
+        # Buttons
+        btn_frame = tk.Frame(dialog, bg=BG_COLOR)
+        btn_frame.pack(fill='x', padx=PAD_X, pady=PAD_Y)
+
+        def import_selected():
+            # Import all SKUs from the tree
+            from convertor import save_sku_classification
+            imported = 0
+            for item in sync_tree.get_children():
+                values = sync_tree.item(item, 'values')
+                sku = values[0]
+                brand = values[1]
+                category = values[2]
+                active = values[3] == '✓'
+
+                if sku and sku.strip():
+                    try:
+                        save_sku_classification(sku, brand, category, active)
+                        imported += 1
+                    except Exception as e:
+                        messagebox.showerror('Помилка', f'Помилка при імпорті {sku}: {e}', parent=dialog)
+
+            if imported > 0:
+                self._refresh_sku_table()
+                self.app.status_var.set(f'Імпортовано {imported} нових SKU з БД')
+                messagebox.showinfo('Успіх', f'Імпортовано {imported} SKU', parent=dialog)
+            dialog.destroy()
+
+        def auto_classify_all():
+            from convertor import auto_classify_sku
+            for item in sync_tree.get_children():
+                values = sync_tree.item(item, 'values')
+                sku = values[0]
+                brand = values[1]
+                category, confidence = auto_classify_sku(sku, brand)
+                if category and confidence >= 0.7:
+                    active = True
+                    active_text = '✓'
+                    tags = ('auto',)
+                else:
+                    category = category or 'ЛІК'
+                    active = False
+                    active_text = '✗'
+                    tags = ('manual',)
+                sync_tree.item(item, values=(sku, brand, category, active_text), tags=tags)
+
+        def select_all():
+            for item in sync_tree.get_children():
+                sync_tree.selection_add(item)
+
+        def deselect_all():
+            for item in sync_tree.selection():
+                sync_tree.selection_remove(item)
+
+        ModernButton(btn_frame, text='✅ Авто-класифікувати', style='secondary', command=auto_classify_all).pack(side='left', padx=(0, 8))
+        ModernButton(btn_frame, text='☑️ Вибрати всі', style='secondary', command=select_all).pack(side='left', padx=(0, 8))
+        ModernButton(btn_frame, text='☐ Зняти вибір', style='secondary', command=deselect_all).pack(side='left', padx=(0, 8))
+        ModernButton(btn_frame, text='Скасувати', style='secondary', command=dialog.destroy).pack(side='right', padx=(8, 0))
+        ModernButton(btn_frame, text='💾 Імпортувати вибране', style='success', command=import_selected).pack(side='right')
+
+    def _edit_sync_sku_dialog(self, tree, item, values):
+        """Dialog to edit SKU in sync preview."""
+        dialog = tk.Toplevel(self)
+        dialog.title('Редагувати SKU')
+        dialog.geometry('420x300')
+        dialog.configure(bg=BG_COLOR)
+        dialog.transient(self)
+        dialog.grab_set()
+
+        # Center on parent
+        dialog.update_idletasks()
+        x = self.winfo_rootx() + (self.winfo_width() - dialog.winfo_width()) // 2
+        y = self.winfo_rooty() + (self.winfo_height() - dialog.winfo_height()) // 2
+        dialog.geometry(f'+{x}+{y}')
+
+        fields = {}
+        labels = [
+            ('SKU_UA', 'SKU / Назва товару (обов\'язково)'),
+            ('BRAND', 'Бренд'),
+            ('CATEGORY', 'Категорія (ЛІК/ДД)'),
+        ]
+        for i, (key, label) in enumerate(labels):
+            tk.Label(dialog, text=label, font=FONT_BODY, bg=BG_COLOR, fg=TEXT_MAIN).grid(
+                row=i, column=0, sticky='w', padx=PAD_X, pady=(PAD_Y, 4)
+            )
+            if key == 'CATEGORY':
+                cb = ttk.Combobox(dialog, values=['ЛІК', 'ДД'], state='readonly', font=FONT_BODY, width=35)
+                cb.grid(row=i, column=0, sticky='ew', padx=PAD_X, pady=(0, 4))
+                fields[key] = cb
+            else:
+                entry = tk.Entry(dialog, font=FONT_BODY, relief='solid', bd=1, highlightthickness=1,
+                                highlightcolor=BORDER_FOCUS, highlightbackground=BORDER)
+                entry.grid(row=i, column=0, sticky='ew', padx=PAD_X, pady=(0, 4))
+                fields[key] = entry
+
+        # Active checkbox
+        active_var = tk.BooleanVar(value=values[3] == '✓')
+        tk.Checkbutton(dialog, text='Активний', variable=active_var, font=FONT_BODY, bg=BG_COLOR).grid(
+            row=3, column=0, sticky='w', padx=PAD_X, pady=(PAD_Y, 4)
+        )
+
+        # Pre-fill
+        fields['SKU_UA'].insert(0, values[0])
+        fields['SKU_UA'].config(state='readonly')
+        fields['BRAND'].insert(0, values[1])
+        fields['CATEGORY'].set(values[2])
+
+        dialog.grid_columnconfigure(0, weight=1)
+
+        def save():
+            sku = fields['SKU_UA'].get().strip()
+            brand = fields['BRAND'].get().strip()
+            category = fields['CATEGORY'].get().strip()
+            active = active_var.get()
+
+            if not sku:
+                messagebox.showwarning('Помилка', 'SKU не може бути порожнім', parent=dialog)
+                return
+            if category not in ('ЛІК', 'ДД'):
+                messagebox.showwarning('Помилка', 'Категорія: ЛІК або ДД', parent=dialog)
+                return
+
+            active_text = '✓' if active else '✗'
+            tags = ('auto',) if active else ('manual',)
+            tree.item(item, values=(sku, brand, category, active_text), tags=tags)
+            dialog.destroy()
+
+        btn_frame = tk.Frame(dialog, bg=BG_COLOR)
+        btn_frame.grid(row=4, column=0, sticky='ew', padx=PAD_X, pady=PAD_Y)
+        ModernButton(btn_frame, text='Скасувати', style='secondary', command=dialog.destroy).pack(side='right', padx=(8, 0))
+        ModernButton(btn_frame, text='Зберегти', style='success', command=save).pack(side='right')
 
     def _on_sku_double_click(self, event):
         item = self.sku_tree.selection()[0] if self.sku_tree.selection() else None

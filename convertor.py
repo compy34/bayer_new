@@ -287,6 +287,148 @@ def get_unknown_skus(mhl_df, sku_col='SKU_UA'):
     return unknown_df[sku_col].unique().tolist()
 
 
+def get_unknown_skus_with_brands(mhl_df, sku_col='SKU_UA', brand_col='BRAND'):
+    """Get unknown SKUs with their brands from MHL data."""
+    load_sku_classification()
+
+    if mhl_df is None or mhl_df.empty or sku_col not in mhl_df.columns:
+        return pd.DataFrame(columns=['SKU_UA', 'BRAND'])
+
+    known_skus = set(_sku_to_category.keys())
+    mhl_skus = mhl_df[sku_col].fillna('').astype(str).str.strip().str.casefold()
+    unknown_mask = ~mhl_skus.isin(known_skus) & (mhl_skus != '')
+
+    unknown_df = mhl_df[unknown_mask].drop_duplicates(subset=[sku_col])
+
+    # Get brand for each unknown SKU
+    result = []
+    for _, row in unknown_df.iterrows():
+        sku = str(row.get(sku_col, '')).strip()
+        brand = str(row.get(brand_col, '')).strip() if brand_col in unknown_df.columns else ''
+        result.append({'SKU_UA': sku, 'BRAND': brand})
+
+    return pd.DataFrame(result)
+
+
+def auto_classify_sku(sku_name, brand):
+    """Auto-classify a SKU based on brand mapping.
+
+    Returns (category, confidence) where category is 'ЛІК' or 'ДД'
+    and confidence is a float 0-1.
+    """
+    if not brand:
+        return None, 0.0
+
+    brand_clean = str(brand).strip()
+    brand_lower = brand_clean.lower()
+
+    # Check DB_BRAND_TO_TEMPLATE mapping
+    from config import DB_BRAND_TO_TEMPLATE, LIK_BRANDS_TEMPLATE, DD_BRANDS_TEMPLATE
+
+    # Direct match in mapping (case-sensitive first, then case-insensitive)
+    template_brand = DB_BRAND_TO_TEMPLATE.get(brand_clean)
+    if not template_brand:
+        # Try case-insensitive lookup
+        for k, v in DB_BRAND_TO_TEMPLATE.items():
+            if k.lower() == brand_lower:
+                template_brand = v
+                break
+
+    if template_brand:
+        if template_brand in LIK_BRANDS_TEMPLATE:
+            return 'ЛІК', 0.95
+        elif template_brand in DD_BRANDS_TEMPLATE:
+            return 'ДД', 0.95
+
+    # Check if brand directly matches a template brand (case-insensitive)
+    for t_brand in LIK_BRANDS_TEMPLATE:
+        if brand_lower == t_brand.lower():
+            return 'ЛІК', 0.9
+    for t_brand in DD_BRANDS_TEMPLATE:
+        if brand_lower == t_brand.lower():
+            return 'ДД', 0.9
+
+    # Fallback: check brand name keywords
+    lik_keywords = ['лік', 'lik', 'pharma', 'farm', 'medic', 'drug', 'tablet', 'capsule', 'ampul', 'ampoule', 'vial', 'syringe', 'інфуз', 'ін’єкц', 'інжекц', 'інфузі', 'інфузія']
+    dd_keywords = ['дд', 'dd', 'cosmetic', 'косметик', 'derma', 'дерма', 'skin', 'шкір', 'cream', 'крем', 'gel', 'гель', 'ointment', 'мазь', 'lotion', 'лосьйон', 'shampoo', 'шампунь', 'soap', 'мило', 'sunscreen', 'сонцезах', 'suncare', 'sun care', 'сенсідерм', 'sensiderm']
+
+    lik_score = sum(1 for kw in lik_keywords if kw in brand_lower)
+    dd_score = sum(1 for kw in dd_keywords if kw in brand_lower)
+
+    if lik_score > dd_score and lik_score > 0:
+        return 'ЛІК', 0.6
+    elif dd_score > lik_score and dd_score > 0:
+        return 'ДД', 0.6
+
+    return None, 0.0
+
+
+def bulk_import_unknown_skus(mhl_df, sku_col='SKU_UA', brand_col='BRAND', auto_classify=True):
+    """Import unknown SKUs from MHL data into classification.
+
+    Args:
+        mhl_df: MHL dataframe
+        sku_col: SKU column name
+        brand_col: Brand column name
+        auto_classify: If True, try to auto-classify; if False, mark as inactive for manual review
+
+    Returns:
+        dict with 'imported', 'skipped', 'errors' counts and 'details' list
+    """
+    unknown_df = get_unknown_skus_with_brands(mhl_df, sku_col, brand_col)
+
+    if unknown_df.empty:
+        return {'imported': 0, 'skipped': 0, 'errors': 0, 'details': []}
+
+    imported = 0
+    skipped = 0
+    errors = 0
+    details = []
+
+    for _, row in unknown_df.iterrows():
+        sku = row['SKU_UA']
+        brand = row['BRAND']
+
+        if not sku:
+            skipped += 1
+            details.append({'sku': sku, 'brand': brand, 'status': 'skipped', 'reason': 'Empty SKU'})
+            continue
+
+        category = ''
+        active = False
+
+        if auto_classify:
+            cat, confidence = auto_classify_sku(sku, brand)
+            if cat and confidence >= 0.7:
+                category = cat
+                active = True
+            else:
+                # Low confidence - mark inactive for manual review
+                category = 'ЛІК'  # default
+                active = False
+        else:
+            # Manual review mode
+            category = 'ЛІК'  # default
+            active = False
+
+        try:
+            save_sku_classification(sku, brand, category, active)
+            imported += 1
+            details.append({
+                'sku': sku,
+                'brand': brand,
+                'status': 'imported',
+                'category': category,
+                'active': active,
+                'auto_classified': auto_classify and category != ''
+            })
+        except Exception as e:
+            errors += 1
+            details.append({'sku': sku, 'brand': brand, 'status': 'error', 'reason': str(e)})
+
+    return {'imported': imported, 'skipped': skipped, 'errors': errors, 'details': details}
+
+
 # Initialize legacy lists on module import
 _init_legacy_sku_lists()
 
