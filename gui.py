@@ -26,6 +26,8 @@ from convertor import (
     mhl_unknown_samples,
     get_mhl_lik_sku,
     get_mhl_dd_sku,
+    get_mhl_lik_brands,
+    get_mhl_dd_brands,
     get_tma_auth_amount,
     set_tma_auth_amount,
     get_all_penetration_targets,
@@ -36,6 +38,7 @@ from convertor import (
     set_la_price_file,
     get_all_la_prices,
     set_la_price,
+    get_mhl_unique_brands,
 )
 from Data.Controller import get_mhl_data, get_pharmacy_data, load_requisites_file, get_tma_offtake_data, DataLoadError
 
@@ -644,6 +647,12 @@ class SettingsDialog(tk.Toplevel):
 
         self._refresh_mhl_action_preview()
 
+        # --- Debug: Show MHL brands ---
+        debug_frame = tk.Frame(parent, bg=BG_COLOR)
+        debug_frame.pack(fill='x', pady=(PAD_Y, 0))
+        ModernButton(debug_frame, text='🔍 Показати бренди в MHL даних', style='secondary',
+                    command=self._show_mhl_brands).pack(side='left')
+
         # --- LA_Price File (Service Prices) ---
         tk.Label(parent, text='Файл цін послуг (LA_Price):', font=FONT_SUBTITLE, bg=BG_COLOR, fg=TEXT_MAIN).pack(anchor='w', pady=(PAD_Y, 4))
         tk.Label(parent, text='Аркуш "LA_Price" або перший аркуш, колонки: Brand та Price', font=FONT_SMALL, bg=BG_COLOR, fg=TEXT_MUTED).pack(anchor='w', pady=(0, PAD_Y))
@@ -1202,6 +1211,67 @@ class ReportApp:
         else:
             return self.df_mhl.iloc[0:0]
         return filtered if not filtered.empty else self.df_mhl.iloc[0:0]
+
+    def _show_mhl_brands(self):
+        """Show unique brands in MHL data for debugging."""
+        from tkinter import messagebox
+        if self.df_mhl is None or self.df_mhl.empty:
+            messagebox.showinfo('MHL Brands', 'MHL data not loaded', parent=self.root)
+            return
+
+        brands = get_mhl_unique_brands(self.df_mhl)
+        if not brands:
+            messagebox.showinfo('MHL Brands', 'No brands found in MHL data', parent=self.root)
+            return
+
+        # Show in a dialog
+        dialog = tk.Toplevel(self.root)
+        dialog.title('MHL Brands Debug')
+        dialog.geometry('500x600')
+        dialog.configure(bg=BG_COLOR)
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        # Center on parent
+        dialog.update_idletasks()
+        x = self.root.winfo_rootx() + (self.root.winfo_width() - dialog.winfo_width()) // 2
+        y = self.root.winfo_rooty() + (self.root.winfo_height() - dialog.winfo_height()) // 2
+        dialog.geometry(f'+{x}+{y}')
+
+        tk.Label(dialog, text=f'Unique brands in MHL data: {len(brands)}',
+                 font=FONT_SUBTITLE, bg=BG_COLOR, fg=TEXT_MAIN).pack(anchor='w', padx=PAD_X, pady=PAD_Y)
+
+        # Text area with scrollbar
+        frame = tk.Frame(dialog, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
+        frame.pack(fill='both', expand=True, padx=PAD_X, pady=(0, PAD_X))
+
+        text = tk.Text(frame, font=FONT_MONO, bg=SURFACE, fg=TEXT_MAIN, wrap='none', relief='flat', bd=0)
+        text.pack(side='left', fill='both', expand=True, padx=8, pady=8)
+
+        vsb = ttk.Scrollbar(frame, orient='vertical', command=text.yview)
+        vsb.pack(side='right', fill='y', pady=8)
+        text.configure(yscrollcommand=vsb.set)
+
+        # Also show which ones match our LIK/DD lists
+        lik_brands = {b.lower() for b in get_mhl_lik_brands()}
+        dd_brands = {b.lower() for b in get_mhl_dd_brands()}
+
+        for brand in brands:
+            brand_lower = brand.lower()
+            status = ''
+            if brand_lower in lik_brands:
+                status = ' ✓ ЛІК'
+            elif brand_lower in dd_brands:
+                status = ' ✓ ДД'
+            else:
+                status = ' ✗ UNKNOWN'
+            text.insert('end', f'{brand}{status}\n')
+
+        text.config(state='disabled')
+
+        btn_frame = tk.Frame(dialog, bg=BG_COLOR)
+        btn_frame.pack(fill='x', padx=PAD_X, pady=PAD_Y)
+        ModernButton(btn_frame, text='Закрити', style='secondary', command=dialog.destroy).pack(side='right')
 
     def load_data(self):
         try:

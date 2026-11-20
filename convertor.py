@@ -2136,6 +2136,18 @@ def mhl_brand_counts(df):
     )
 
 
+def get_mhl_unique_brands(df):
+    """Get unique brands from MHL data for debugging."""
+    if df is None or df.empty:
+        return []
+    brand_col = 'BRAND' if 'BRAND' in df.columns else 'brand'
+    if brand_col not in df.columns:
+        return []
+    brands = df[brand_col].fillna('').astype(str).str.strip()
+    unique = brands[brands != ''].unique()
+    return sorted(unique.tolist())
+
+
 def mhl_unknown_samples(df, limit=8):
     """Return real database values that are not classified by the brand lists."""
     if df is None or df.empty:
