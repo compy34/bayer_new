@@ -693,8 +693,10 @@ def get_mhl_availability_sum(mhl_df, template_brands):
     allowed_brands = get_mhl_lik_brands() if is_lic else get_mhl_dd_brands()
     # BRAND column in MHL data contains database brand names
     brand_col = 'BRAND' if 'BRAND' in work_df.columns else 'brand'
+    # Case-insensitive matching with whitespace handling
     brand_values = work_df[brand_col].fillna('').astype(str).str.strip()
-    work_df = work_df[brand_values.isin(allowed_brands)].copy()
+    allowed_brands_lower = {b.lower() for b in allowed_brands}
+    work_df = work_df[brand_values.str.lower().isin(allowed_brands_lower)].copy()
 
     if work_df.empty:
         return 0.0
@@ -969,8 +971,12 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
         is_lic_category = template_brands == LIK_BRANDS_TEMPLATE
         allowed_brands = get_mhl_lik_brands() if is_lic_category else get_mhl_dd_brands()
         brand_col = 'BRAND' if 'BRAND' in work_df.columns else 'brand'
+
+        # Case-insensitive matching with whitespace handling
+        # Normalize both MHL brands and allowed brands to lowercase for comparison
         brand_values = work_df[brand_col].fillna('').astype(str).str.strip()
-        work_df = work_df[brand_values.isin(allowed_brands)].copy()
+        allowed_brands_lower = {b.lower() for b in allowed_brands}
+        work_df = work_df[brand_values.str.lower().isin(allowed_brands_lower)].copy()
 
         if not work_df.empty:
             # Convert numeric columns, keeping track of which were originally NULL
@@ -1293,10 +1299,11 @@ def get_all_sku_for_category(template_brands, mhl_df=None):
         sku_col = 'SKU_UA' if 'SKU_UA' in mhl_df.columns else 'Назва товару'
         brand_col = 'BRAND' if 'BRAND' in mhl_df.columns else 'brand'
 
-        # Filter MHL data by category brands
+        # Filter MHL data by category brands (case-insensitive)
         work_df = mhl_df.copy()
         brand_values = work_df[brand_col].fillna('').astype(str).str.strip()
-        work_df = work_df[brand_values.isin(db_brands)].copy()
+        db_brands_lower = {b.lower() for b in db_brands}
+        work_df = work_df[brand_values.str.lower().isin(db_brands_lower)].copy()
 
         if not work_df.empty:
             # Get unique SKUs with their brands
@@ -1445,11 +1452,12 @@ def fill_tma_worksheet(ws, template_brands, period_start, period_end, executor_n
     if mapping_df is not None and not mapping_df.empty:
         sku_col = 'SKU_UA' if 'SKU_UA' in mapping_df.columns else 'Назва товару'
         work_df = mapping_df.copy()
-        # Filter to relevant brands
+        # Filter to relevant brands (case-insensitive)
         allowed_brands = get_mhl_lik_brands() if is_lic else get_mhl_dd_brands()
         brand_col = 'BRAND' if 'BRAND' in work_df.columns else 'brand'
         brand_values = work_df[brand_col].fillna('').astype(str).str.strip()
-        work_df = work_df[brand_values.isin(allowed_brands)].copy()
+        allowed_brands_lower = {b.lower() for b in allowed_brands}
+        work_df = work_df[brand_values.str.lower().isin(allowed_brands_lower)].copy()
 
         if not work_df.empty:
             for column in ['PRICE_CP', 'SUPPLY', 'DRUG_ID']:
@@ -1470,7 +1478,8 @@ def fill_tma_worksheet(ws, template_brands, period_start, period_end, executor_n
         allowed_brands = get_mhl_lik_brands() if is_lic else get_mhl_dd_brands()
         brand_col = 'BRAND' if 'BRAND' in work_df.columns else 'brand'
         brand_values = work_df[brand_col].fillna('').astype(str).str.strip()
-        work_df = work_df[brand_values.isin(allowed_brands)].copy()
+        allowed_brands_lower = {b.lower() for b in allowed_brands}
+        work_df = work_df[brand_values.str.lower().isin(allowed_brands_lower)].copy()
 
         if not work_df.empty:
             for column in ['PRICE_CP', 'SUPPLY']:
@@ -2110,15 +2119,15 @@ def mhl_brand_counts(df):
     if df is None or df.empty or 'SKU_UA' not in df.columns:
         return 0, 0, 0
 
-    # Use brand-based filtering
+    # Use brand-based filtering (case-insensitive)
     brand_col = 'BRAND' if 'BRAND' in df.columns else 'brand'
     if brand_col not in df.columns:
         return 0, 0, 0
 
-    brand_names = df[brand_col].fillna('').astype(str).str.strip()
+    brand_names = df[brand_col].fillna('').astype(str).str.strip().str.lower()
 
-    lik_brands = get_mhl_lik_brands()
-    dd_brands = get_mhl_dd_brands()
+    lik_brands = {b.lower() for b in get_mhl_lik_brands()}
+    dd_brands = {b.lower() for b in get_mhl_dd_brands()}
 
     lik_match = brand_names.isin(lik_brands)
     dd_match = brand_names.isin(dd_brands)
@@ -2136,10 +2145,10 @@ def mhl_unknown_samples(df, limit=8):
     if brand_col not in df.columns:
         return []
 
-    brand_names = df[brand_col].fillna('').astype(str).str.strip()
+    brand_names = df[brand_col].fillna('').astype(str).str.strip().str.lower()
 
-    lik_brands = get_mhl_lik_brands()
-    dd_brands = get_mhl_dd_brands()
+    lik_brands = {b.lower() for b in get_mhl_lik_brands()}
+    dd_brands = {b.lower() for b in get_mhl_dd_brands()}
     known_brands = lik_brands | dd_brands
 
     unknown = df.loc[
