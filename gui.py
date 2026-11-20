@@ -39,6 +39,9 @@ from convertor import (
     get_all_la_prices,
     set_la_price,
     get_mhl_unique_brands,
+    get_all_brand_classifications,
+    set_brand_category,
+    remove_brand_classification,
 )
 from Data.Controller import get_mhl_data, get_pharmacy_data, load_requisites_file, get_tma_offtake_data, DataLoadError
 
@@ -184,6 +187,11 @@ class SettingsDialog(tk.Toplevel):
         tma_settings_frame = tk.Frame(notebook, bg=BG_COLOR)
         notebook.add(tma_settings_frame, text='  ТМА Налаштування  ')
         self._build_tma_settings_tab(tma_settings_frame)
+
+        # --- Tab 6: Brand Qualification ---
+        brand_frame = tk.Frame(notebook, bg=BG_COLOR)
+        notebook.add(brand_frame, text='  Кваліфікація брендів  ')
+        self._build_brand_tab(brand_frame)
 
         # Close button
         btn_frame = tk.Frame(self, bg=BG_COLOR)
@@ -897,6 +905,259 @@ class SettingsDialog(tk.Toplevel):
         self.la_price_preview.insert('end', f'Завантажено брендів: {len(prices)}\n\n')
         for brand, price in sorted(prices.items()):
             self.la_price_preview.insert('end', f'{brand}: {price:.2f} грн.\n')
+
+    def _build_brand_tab(self, parent):
+        """Brand qualification tab - assign brands to ЛІК or ДД category."""
+        tk.Label(
+            parent,
+            text='Кваліфікація брендів: призначайте бренди категорії ЛІК або ДД.\n'
+                 'Ці налаштування додаються до конфігурації з config.py і мають вищий пріоритет.',
+            font=FONT_SMALL, bg=BG_COLOR, fg=TEXT_MUTED, wraplength=600, justify='left'
+        ).pack(anchor='w', pady=(0, PAD_Y))
+
+        # Toolbar
+        toolbar = tk.Frame(parent, bg=BG_COLOR)
+        toolbar.pack(fill='x', pady=(0, 8))
+
+        ModernButton(toolbar, text='➕ Додати бренд', style='primary', command=self._add_brand).pack(side='left', padx=(0, 8))
+        ModernButton(toolbar, text='🔄 Оновити', style='secondary', command=self._refresh_brand_table).pack(side='left')
+        ModernButton(toolbar, text='📥 Завантажити з MHL', style='outline', command=self._load_brands_from_mhl).pack(side='left', padx=(8, 0))
+
+        # Table
+        table_frame = tk.Frame(parent, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
+        table_frame.pack(fill='both', expand=True)
+
+        columns = ('BRAND', 'CATEGORY')
+        self.brand_tree = ttk.Treeview(table_frame, columns=columns, show='headings', selectmode='extended')
+
+        col_config = {
+            'BRAND': ('Бренд (назва в базі даних)', 400),
+            'CATEGORY': ('Категорія', 120),
+        }
+        for col, (title, width) in col_config.items():
+            self.brand_tree.heading(col, text=title)
+            self.brand_tree.column(col, width=width, anchor='w' if col != 'CATEGORY' else 'center')
+
+        vsb = ttk.Scrollbar(table_frame, orient='vertical', command=self.brand_tree.yview)
+        hsb = ttk.Scrollbar(table_frame, orient='horizontal', command=self.brand_tree.xview)
+        self.brand_tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+
+        self.brand_tree.grid(row=0, column=0, sticky='nsew')
+        vsb.grid(row=0, column=1, sticky='ns')
+        hsb.grid(row=1, column=0, sticky='ew')
+        table_frame.grid_rowconfigure(0, weight=1)
+        table_frame.grid_columnconfigure(0, weight=1)
+
+        self.brand_tree.bind('<Double-1>', self._on_brand_double_click)
+        self.brand_tree.bind('<Delete>', lambda e: self._delete_selected_brands())
+
+        # Legend
+        legend_frame = tk.Frame(parent, bg=BG_COLOR)
+        legend_frame.pack(fill='x', pady=(PAD_Y, 0))
+        tk.Label(legend_frame, text='Легенда:', font=FONT_SMALL, bg=BG_COLOR, fg=TEXT_MUTED).pack(side='left')
+        tk.Label(legend_frame, text='🟦 ЛІК = Лікарські засоби', font=FONT_SMALL, bg=BG_COLOR, fg='#1a56a0').pack(side='left', padx=(16, 8))
+        tk.Label(legend_frame, text='🟧 ДД = Не лікарські засоби', font=FONT_SMALL, bg=BG_COLOR, fg='#e67e22').pack(side='left', padx=(0, 8))
+        tk.Label(legend_frame, text='(подвійний клік для редагування, Delete для видалення)', font=FONT_SMALL, bg=BG_COLOR, fg=TEXT_MUTED).pack(side='left', padx=(16, 0))
+
+        self._refresh_brand_table()
+
+    def _refresh_brand_table(self):
+        for item in self.brand_tree.get_children():
+            self.brand_tree.delete(item)
+        df = get_all_brand_classifications()
+        for _, row in df.iterrows():
+            cat = row['CATEGORY']
+            # Color coding by category
+            item = self.brand_tree.insert('', 'end', values=(row['BRAND'], cat))
+            if cat == 'ЛІК':
+                self.brand_tree.item(item, tags=('lik',))
+            elif cat == 'ДД':
+                self.brand_tree.item(item, tags=('dd',))
+        # Configure tags for color
+        self.brand_tree.tag_configure('lik', foreground='#1a56a0')
+        self.brand_tree.tag_configure('dd', foreground='#e67e22')
+
+    def _on_brand_double_click(self, event):
+        item = self.brand_tree.selection()[0] if self.brand_tree.selection() else None
+        if not item:
+            return
+        values = self.brand_tree.item(item, 'values')
+        self._edit_brand_dialog(values)
+
+    def _add_brand(self):
+        self._edit_brand_dialog()
+
+    def _edit_brand_dialog(self, values=None):
+        """Dialog to add/edit brand classification."""
+        dialog = tk.Toplevel(self)
+        dialog.title('Редагувати бренд' if values else 'Додати бренд')
+        dialog.geometry('420x220')
+        dialog.configure(bg=BG_COLOR)
+        dialog.transient(self)
+        dialog.grab_set()
+
+        dialog.update_idletasks()
+        x = self.winfo_rootx() + (self.winfo_width() - dialog.winfo_width()) // 2
+        y = self.winfo_rooty() + (self.winfo_height() - dialog.winfo_height()) // 2
+        dialog.geometry(f'+{x}+{y}')
+
+        fields = {}
+        labels = [
+            ('BRAND', 'Назва бренда (як в базі даних, обов\'язково)'),
+            ('CATEGORY', 'Категорія (ЛІК або ДД)'),
+        ]
+        for i, (key, label) in enumerate(labels):
+            tk.Label(dialog, text=label, font=FONT_BODY, bg=BG_COLOR, fg=TEXT_MAIN).grid(
+                row=i, column=0, sticky='w', padx=PAD_X, pady=(PAD_Y, 4)
+            )
+            if key == 'CATEGORY':
+                var = tk.StringVar(value='ЛІК')
+                combo = ttk.Combobox(dialog, textvariable=var, values=['ЛІК', 'ДД'],
+                                      state='readonly', font=FONT_BODY, width=45)
+                combo.grid(row=i, column=0, sticky='ew', padx=PAD_X, pady=(0, 4))
+                fields[key] = var
+            else:
+                entry = tk.Entry(dialog, font=FONT_BODY, relief='solid', bd=1,
+                                highlightthickness=1, highlightcolor=BORDER_FOCUS, highlightbackground=BORDER)
+                entry.grid(row=i, column=0, sticky='ew', padx=PAD_X, pady=(0, 4))
+                fields[key] = entry
+
+        dialog.grid_columnconfigure(0, weight=1)
+
+        # Pre-fill if editing
+        if values:
+            fields['BRAND'].insert(0, values[0])
+            fields['BRAND'].config(state='readonly')
+            fields['CATEGORY'].set(values[1])
+
+        def save():
+            brand = fields['BRAND'].get().strip() if isinstance(fields['BRAND'], tk.Entry) else fields['BRAND'].get().strip()
+            category = fields['CATEGORY'].get().strip()
+
+            if not brand:
+                messagebox.showwarning('Помилка', 'Назва бренда не може бути порожньою', parent=dialog)
+                return
+
+            if category not in ('ЛІК', 'ДД'):
+                messagebox.showwarning('Помилка', 'Категорія має бути ЛІК або ДД', parent=dialog)
+                return
+
+            try:
+                set_brand_category(brand, category)
+                self._refresh_brand_table()
+                dialog.destroy()
+                self.app.status_var.set(f'Бренд оновлено: {brand} = {category}')
+            except Exception as e:
+                messagebox.showerror('Помилка', f'Не вдалося зберегти: {e}', parent=dialog)
+
+        btn_frame = tk.Frame(dialog, bg=BG_COLOR)
+        btn_frame.grid(row=2, column=0, sticky='ew', padx=PAD_X, pady=PAD_Y)
+        ModernButton(btn_frame, text='Скасувати', style='secondary', command=dialog.destroy).pack(side='right', padx=(8, 0))
+        ModernButton(btn_frame, text='Зберегти', style='success', command=save).pack(side='right')
+
+    def _delete_selected_brands(self):
+        selected = self.brand_tree.selection()
+        if not selected:
+            return
+        if messagebox.askyesno('Підтвердження', f'Видалити {len(selected)} бренд(ів) з кваліфікації?', parent=self):
+            for item in selected:
+                values = self.brand_tree.item(item, 'values')
+                brand = values[0]
+                remove_brand_classification(brand)
+            self._refresh_brand_table()
+
+    def _load_brands_from_mhl(self):
+        """Load unique brands from current MHL data and add unknown ones to classification."""
+        if self.app.df_mhl is None or self.app.df_mhl.empty:
+            messagebox.showinfo('MHL дані', 'MHL дані не завантажені. Спочатку натисніть "Завантажити дані".', parent=self)
+            return
+
+        brands = get_mhl_unique_brands(self.app.df_mhl)
+        if not brands:
+            messagebox.showinfo('MHL дані', 'Бренди не знайдені в MHL даних.', parent=self)
+            return
+
+        # Get current classifications
+        current_df = get_all_brand_classifications()
+        current_brands = set(current_df['BRAND'].str.casefold()) if not current_df.empty else set()
+
+        # Get config-based brands (already classified)
+        lik_brands = {b.casefold() for b in get_mhl_lik_brands()}
+        dd_brands = {b.casefold() for b in get_mhl_dd_brands()}
+        all_known = lik_brands | dd_brands
+
+        # Find unknown brands
+        unknown_brands = [b for b in brands if b.casefold() not in current_brands and b.casefold() not in all_known]
+
+        if not unknown_brands:
+            messagebox.showinfo('MHL дані', 'Всі бренди вже мають кваліфікацію.', parent=self)
+            return
+
+        # Show dialog to select which unknown brands to add
+        dialog = tk.Toplevel(self)
+        dialog.title('Невідомі бренди з MHL')
+        dialog.geometry('500x500')
+        dialog.configure(bg=BG_COLOR)
+        dialog.transient(self)
+        dialog.grab_set()
+
+        dialog.update_idletasks()
+        x = self.winfo_rootx() + (self.winfo_width() - dialog.winfo_width()) // 2
+        y = self.winfo_rooty() + (self.winfo_height() - dialog.winfo_height()) // 2
+        dialog.geometry(f'+{x}+{y}')
+
+        tk.Label(dialog, text=f'Знайдено {len(unknown_brands)} невідомих брендів у MHL даних:',
+                 font=FONT_SUBTITLE, bg=BG_COLOR, fg=TEXT_MAIN).pack(anchor='w', padx=PAD_X, pady=PAD_Y)
+
+        # List with checkboxes
+        frame = tk.Frame(dialog, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
+        frame.pack(fill='both', expand=True, padx=PAD_X, pady=(0, PAD_X))
+
+        canvas = tk.Canvas(frame, bg=SURFACE, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(frame, orient='vertical', command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        scrollable_frame = tk.Frame(canvas, bg=SURFACE)
+        canvas.create_window((0, 0), window=scrollable_frame, anchor='nw')
+
+        checkboxes = {}
+        for brand in unknown_brands:
+            var = tk.BooleanVar(value=True)
+            cb = tk.Checkbutton(scrollable_frame, text=brand, variable=var,
+                                 font=FONT_BODY, bg=SURFACE, fg=TEXT_MAIN,
+                                 activebackground=SURFACE, anchor='w')
+            cb.pack(fill='x', padx=8, pady=2)
+            checkboxes[brand] = var
+
+        scrollable_frame.update_idletasks()
+        canvas.config(scrollregion=canvas.bbox('all'))
+        canvas.pack(side='left', fill='both', expand=True, padx=8, pady=8)
+        scrollbar.pack(side='right', fill='y', pady=8)
+
+        def add_selected():
+            added = 0
+            for brand, var in checkboxes.items():
+                if var.get():
+                    # Try to guess category from config
+                    cat = None
+                    brand_lower = brand.casefold()
+                    if brand_lower in lik_brands:
+                        cat = 'ЛІК'
+                    elif brand_lower in dd_brands:
+                        cat = 'ДД'
+                    else:
+                        cat = 'ЛІК'  # default
+                    set_brand_category(brand, cat)
+                    added += 1
+            self._refresh_brand_table()
+            dialog.destroy()
+            self.app.status_var.set(f'Додано {added} бренд(ів) до кваліфікації')
+            messagebox.showinfo('Готово', f'Додано {added} бренд(ів) до кваліфікації.', parent=self)
+
+        btn_frame = tk.Frame(dialog, bg=BG_COLOR)
+        btn_frame.pack(fill='x', padx=PAD_X, pady=PAD_Y)
+        ModernButton(btn_frame, text='Скасувати', style='secondary', command=dialog.destroy).pack(side='right', padx=(8, 0))
+        ModernButton(btn_frame, text='Додати вибране', style='success', command=add_selected).pack(side='right')
 
 
 class ReportApp:

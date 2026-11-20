@@ -145,14 +145,24 @@ def get_db_brands_for_category(template_brands):
     return db_brands
 
 
-def get_mhl_lik_brands():
-    """Get database brand names for ЛІК category."""
+def _get_config_lik_brands():
+    """Get database brand names for ЛІК category from config only."""
     return get_db_brands_for_category(LIK_BRANDS_TEMPLATE)
 
 
-def get_mhl_dd_brands():
-    """Get database brand names for ДД category."""
+def _get_config_dd_brands():
+    """Get database brand names for ДД category from config only."""
     return get_db_brands_for_category(DD_BRANDS_TEMPLATE)
+
+
+def get_mhl_lik_brands():
+    """Get database brand names for ЛІК category (config + local JSON classification)."""
+    return get_combined_lik_brands()
+
+
+def get_mhl_dd_brands():
+    """Get database brand names for ДД category (config + local JSON classification)."""
+    return get_combined_dd_brands()
 
 
 # ============================================================
@@ -2171,3 +2181,143 @@ def mhl_unknown_samples(df, limit=8):
         f'{brand} / {sku}'
         for brand, sku in unknown.head(limit).itertuples(index=False, name=None)
     ]
+
+
+# ============================================================
+# BRAND CLASSIFICATION (local JSON overrides for ЛІК/ДД)
+# ============================================================
+# Allows users to add custom brand classifications that supplement
+# or override the config.py definitions (DB_BRAND_TO_TEMPLATE, LIK_BRANDS_TEMPLATE, DD_BRANDS_TEMPLATE)
+
+BRAND_CLASSIFICATION_FILE = Path(__file__).resolve().parent / 'brand_classification.json'
+_brand_classification_cache = None
+_brand_classification_lock = threading.Lock()
+
+
+def load_brand_classification():
+    """Load brand classification from JSON file.
+
+    Returns dict mapping brand_name (lowercase) -> category ('ЛІК' or 'ДД')
+    """
+    global _brand_classification_cache
+
+    if _brand_classification_cache is not None:
+        return _brand_classification_cache
+
+    import json
+
+    if not BRAND_CLASSIFICATION_FILE.exists():
+        _brand_classification_cache = {}
+        return _brand_classification_cache
+
+    try:
+        with open(BRAND_CLASSIFICATION_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        # Normalize keys to lowercase for case-insensitive matching
+        _brand_classification_cache = {
+            str(k).strip().casefold(): str(v).strip().upper() for k, v in data.items()
+        }
+        # Validate categories
+        valid = {'ЛІК', 'ДД'}
+        _brand_classification_cache = {
+            k: v for k, v in _brand_classification_cache.items() if v in valid
+        }
+        return _brand_classification_cache
+    except Exception as e:
+        print(f"Error loading brand classification: {e}")
+        _brand_classification_cache = {}
+        return _brand_classification_cache
+
+
+def _save_brand_classification(classification):
+    """Thread-safe save of brand classification to JSON."""
+    with _brand_classification_lock:
+        import json
+        try:
+            with open(BRAND_CLASSIFICATION_FILE, 'w', encoding='utf-8') as f:
+                json.dump(classification, f, ensure_ascii=False, indent=2)
+            return True
+        except Exception as e:
+            print(f"Error saving brand classification: {e}")
+            return False
+
+
+def get_brand_category_local(brand):
+    """Get category (ЛІК/ДД) for a brand from local JSON classification.
+
+    Returns 'ЛІК', 'ДД', or None if not found in local classification.
+    """
+    load_brand_classification()
+    if _brand_classification_cache is None:
+        return None
+    normalized = str(brand).strip().casefold()
+    return _brand_classification_cache.get(normalized)
+
+
+def set_brand_category(brand, category):
+    """Set brand category in local classification.
+
+    Args:
+        brand: Brand name (database brand name)
+        category: 'ЛІК' or 'ДД' (case-insensitive)
+
+    Returns True on success, False on failure.
+    """
+    load_brand_classification()
+    normalized = str(brand).strip().casefold()
+    cat_upper = str(category).strip().upper()
+
+    if cat_upper not in ('ЛІК', 'ДД'):
+        raise ValueError(f"Invalid category: {category}. Must be 'ЛІК' or 'ДД'")
+
+    _brand_classification_cache[normalized] = cat_upper
+    return _save_brand_classification(_brand_classification_cache)
+
+
+def remove_brand_classification(brand):
+    """Remove brand from local classification.
+
+    Returns True on success, False on failure.
+    """
+    load_brand_classification()
+    normalized = str(brand).strip().casefold()
+
+    if normalized in _brand_classification_cache:
+        del _brand_classification_cache[normalized]
+        return _save_brand_classification(_brand_classification_cache)
+    return True
+
+
+def get_all_brand_classifications():
+    """Get all local brand classifications for management dialog."""
+    load_brand_classification()
+    if not _brand_classification_cache:
+        return pd.DataFrame(columns=['BRAND', 'CATEGORY'])
+    df = pd.DataFrame([
+        {'BRAND': k, 'CATEGORY': v} for k, v in _brand_classification_cache.items()
+    ])
+    return df.sort_values('BRAND')
+
+
+def get_combined_lik_brands():
+    """Get all database brands for ЛІК category (config + local classification)."""
+    # Start with config-based brands
+    config_brands = _get_config_lik_brands()
+
+    # Add local classification brands
+    load_brand_classification()
+    local_lik = {b for b, cat in _brand_classification_cache.items() if cat == 'ЛІК'}
+
+    return config_brands.union(local_lik)
+
+
+def get_combined_dd_brands():
+    """Get all database brands for ДД category (config + local classification)."""
+    # Start with config-based brands
+    config_brands = _get_config_dd_brands()
+
+    # Add local classification brands
+    load_brand_classification()
+    local_dd = {b for b, cat in _brand_classification_cache.items() if cat == 'ДД'}
+
+    return config_brands.union(local_dd)
