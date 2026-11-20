@@ -1,5 +1,7 @@
 import pandas as pd
 from datetime import datetime, timedelta
+from pathlib import Path
+import threading
 from openpyxl.styles import Alignment, Border, Font, Side
 from openpyxl.utils import get_column_letter
 from act_generator import generate_act_sheet, generate_tma_act_sheet
@@ -41,396 +43,116 @@ def get_last_day_of_month(date_str):
     return last_day.strftime('%Y-%m-%d')
 
 # ============================================================
-# SKU CLASSIFICATION CONFIG (loaded from CSV)
+# SIMPLE SKU CLASSIFICATION (brand-based ЛІК/ДД)
 # ============================================================
+# No CSV file needed - classification is derived from brand mapping
 
-from pathlib import Path
-import threading
-
-SKU_CLASSIFICATION_FILE = Path(__file__).resolve().parent / 'sku_classification.csv'
-SKU_CLASSIFICATION_LOCK_FILE = Path(__file__).resolve().parent / 'sku_classification.lock'
-
-_sku_classification_cache = None
-_sku_to_category = None
-_sku_to_brand = None
-_sku_classification_lock = threading.Lock()
-
-
-def load_sku_classification():
-    """Load SKU classification from CSV file."""
-    global _sku_classification_cache, _sku_to_category, _sku_to_brand
-
-    if _sku_classification_cache is not None:
-        return _sku_classification_cache
-
-    import pandas as pd
-
-    if not SKU_CLASSIFICATION_FILE.exists():
-        # Return empty classification if file doesn't exist
-        _sku_classification_cache = pd.DataFrame(columns=['SKU_UA', 'BRAND', 'CATEGORY', 'active'])
-        _sku_to_category = {}
-        _sku_to_brand = {}
-        return _sku_classification_cache
-
-    try:
-        df = pd.read_csv(SKU_CLASSIFICATION_FILE, dtype=str)
-        df.columns = df.columns.str.strip()
-
-        # Ensure 'active' column exists (migration for existing CSV)
-        if 'active' not in df.columns:
-            df['active'] = 'true'
-
-        # Normalize active column to boolean
-        df['active'] = df['active'].fillna('true').astype(str).str.strip().str.lower().isin(['true', '1', 'yes', 'так'])
-
-        # Normalize SKU names for matching
-        df['SKU_NORMALIZED'] = df['SKU_UA'].fillna('').astype(str).str.strip().str.casefold()
-        _sku_classification_cache = df
-
-        # Build lookup dictionaries (only for active SKUs)
-        active_df = df[df['active']]
-        _sku_to_category = dict(zip(active_df['SKU_NORMALIZED'], active_df['CATEGORY']))
-        _sku_to_brand = dict(zip(active_df['SKU_NORMALIZED'], active_df['BRAND']))
-
-        return df
-    except Exception as e:
-        print(f"Error loading SKU classification: {e}")
-        _sku_classification_cache = pd.DataFrame(columns=['SKU_UA', 'BRAND', 'CATEGORY', 'active'])
-        _sku_to_category = {}
-        _sku_to_brand = {}
-        return _sku_classification_cache
+from config import DB_BRAND_TO_TEMPLATE, LIK_BRANDS_TEMPLATE, DD_BRANDS_TEMPLATE
 
 
 def get_sku_category(sku_name):
-    """Get category (ЛІК/ДД) for a SKU name."""
-    if _sku_to_category is None:
-        load_sku_classification()
-    normalized = str(sku_name).strip().casefold()
-    return _sku_to_category.get(normalized)
+    """Get category (ЛІК/ДД) for a SKU name based on its brand.
+
+    Uses DB_BRAND_TO_TEMPLATE mapping to find template brand,
+    then checks if template brand is in LIK or DD list.
+    """
+    # This function is kept for compatibility but doesn't use SKU name directly
+    # Category is determined by brand, not SKU
+    return None  # Not used - use get_brand_category instead
 
 
 def get_sku_brand(sku_name):
-    """Get template brand for a SKU name."""
-    if _sku_to_brand is None:
-        load_sku_classification()
-    normalized = str(sku_name).strip().casefold()
-    return _sku_to_brand.get(normalized)
+    """Get template brand for a SKU name - not used in new system."""
+    return None  # Not used
 
 
-def get_mhl_lik_sku():
-    """Get list of LIC SKUs from classification (only active)."""
-    df = load_sku_classification()
-    if df.empty:
-        return []
-    return df[(df['CATEGORY'] == 'ЛІК') & (df['active'])]['SKU_UA'].tolist()
+def get_brand_category(brand):
+    """Get category (ЛІК/ДД) for a brand name.
 
-
-def get_mhl_dd_sku():
-    """Get list of DD SKUs from classification (only active)."""
-    df = load_sku_classification()
-    if df.empty:
-        return []
-    return df[(df['CATEGORY'] == 'ДД') & (df['active'])]['SKU_UA'].tolist()
-
-
-# For backward compatibility - these are now dynamically loaded
-def get_mhl_lik_sku_list():
-    """Backward compatible function returning LIC SKU list."""
-    return get_mhl_lik_sku()
-
-
-def get_mhl_dd_sku_list():
-    """Backward compatible function returning DD SKU list."""
-    return get_mhl_dd_sku()
-
-
-# Legacy constants (populated on first access)
-MHL_LIK_SKU = []
-MHL_DD_SKU = []
-
-
-def _init_legacy_sku_lists():
-    """Initialize legacy SKU lists for backward compatibility."""
-    global MHL_LIK_SKU, MHL_DD_SKU
-    if not MHL_LIK_SKU:
-        MHL_LIK_SKU = get_mhl_lik_sku()
-    if not MHL_DD_SKU:
-        MHL_DD_SKU = get_mhl_dd_sku()
-
-
-def _save_classification_cache():
-    """Thread-safe save of classification cache to CSV."""
-    import csv
-    with _sku_classification_lock:
-        # Use lock file for cross-process safety
-        lock_acquired = False
-        try:
-            # Try to create lock file (atomic operation)
-            SKU_CLASSIFICATION_LOCK_FILE.touch(exist_ok=False)
-            lock_acquired = True
-
-            save_df = _sku_classification_cache[['SKU_UA', 'BRAND', 'CATEGORY', 'active']].copy()
-            save_df.to_csv(SKU_CLASSIFICATION_FILE, index=False, encoding='utf-8', quoting=csv.QUOTE_ALL)
-            return True
-        except FileExistsError:
-            # Lock file exists, another process is writing
-            import time
-            time.sleep(0.1)
-            return _save_classification_cache()  # Retry
-        except Exception as e:
-            print(f"Error saving SKU classification: {e}")
-            return False
-        finally:
-            if lock_acquired and SKU_CLASSIFICATION_LOCK_FILE.exists():
-                try:
-                    SKU_CLASSIFICATION_LOCK_FILE.unlink()
-                except Exception:
-                    pass
-
-
-def _update_lookups():
-    """Rebuild lookup dictionaries from the classification cache."""
-    global _sku_to_category, _sku_to_brand, _sku_classification_cache
-
-    if _sku_classification_cache is None or _sku_classification_cache.empty:
-        _sku_to_category = {}
-        _sku_to_brand = {}
-        return
-
-    # Only active SKUs are used for lookups
-    active_df = _sku_classification_cache[_sku_classification_cache['active']]
-    _sku_to_category = dict(zip(active_df['SKU_NORMALIZED'], active_df['CATEGORY']))
-    _sku_to_brand = dict(zip(active_df['SKU_NORMALIZED'], active_df['BRAND']))
-
-
-# Save to CSV with quoting for consistency (thread-safe)
-def _save_and_update():
-    _update_lookups()
-    return _save_classification_cache()
-
-
-def save_sku_classification(sku_name, brand, category, active=True):
-    """Add or update a SKU classification in the CSV file (thread-safe)."""
-    import pandas as pd
-    import csv
-
-    global _sku_classification_cache, _sku_to_category, _sku_to_brand
-
-    load_sku_classification()  # Ensure cache is loaded
-
-    normalized = str(sku_name).strip().casefold()
-    new_row = {
-        'SKU_UA': str(sku_name).strip(),
-        'BRAND': str(brand).strip(),
-        'CATEGORY': str(category).strip(),
-        'active': bool(active)
-    }
-
-    # Update cache
-    if normalized in _sku_to_category:
-        # Update existing
-        idx = _sku_classification_cache[_sku_classification_cache['SKU_NORMALIZED'] == normalized].index
-        if len(idx) > 0:
-            _sku_classification_cache.loc[idx[0], 'SKU_UA'] = new_row['SKU_UA']
-            _sku_classification_cache.loc[idx[0], 'BRAND'] = new_row['BRAND']
-            _sku_classification_cache.loc[idx[0], 'CATEGORY'] = new_row['CATEGORY']
-            _sku_classification_cache.loc[idx[0], 'active'] = new_row['active']
-    else:
-        # Add new
-        new_row['SKU_NORMALIZED'] = normalized
-        _sku_classification_cache = pd.concat([_sku_classification_cache, pd.DataFrame([new_row])], ignore_index=True)
-
-    return _save_and_update()
-
-
-def set_sku_active(sku_name, active=True):
-    """Set the active status of a SKU (thread-safe)."""
-    import pandas as pd
-    import csv
-
-    global _sku_classification_cache, _sku_to_category, _sku_to_brand
-
-    load_sku_classification()
-
-    normalized = str(sku_name).strip().casefold()
-
-    # Find and update in cache
-    idx = _sku_classification_cache[_sku_classification_cache['SKU_NORMALIZED'] == normalized].index
-    if len(idx) == 0:
-        return False
-
-    _sku_classification_cache.loc[idx[0], 'active'] = bool(active)
-
-    return _save_and_update()
-
-
-def get_all_skus_with_status():
-    """Get all SKUs with their classification and active status for management dialog."""
-    df = load_sku_classification()
-    if df.empty:
-        return pd.DataFrame(columns=['SKU_UA', 'BRAND', 'CATEGORY', 'active'])
-    return df[['SKU_UA', 'BRAND', 'CATEGORY', 'active']].copy()
-
-
-def get_unknown_skus(mhl_df, sku_col='SKU_UA'):
-    """Get unknown SKUs from MHL data that are not in classification (only checks active SKUs)."""
-    load_sku_classification()
-
-    if mhl_df is None or mhl_df.empty or sku_col not in mhl_df.columns:
-        return []
-
-    known_skus = set(_sku_to_category.keys())
-    mhl_skus = mhl_df[sku_col].fillna('').astype(str).str.strip().str.casefold()
-    unknown_mask = ~mhl_skus.isin(known_skus) & (mhl_skus != '')
-
-    unknown_df = mhl_df[unknown_mask].drop_duplicates(subset=[sku_col])
-    return unknown_df[sku_col].unique().tolist()
-
-
-def get_unknown_skus_with_brands(mhl_df, sku_col='SKU_UA', brand_col='BRAND'):
-    """Get unknown SKUs with their brands from MHL data."""
-    load_sku_classification()
-
-    if mhl_df is None or mhl_df.empty or sku_col not in mhl_df.columns:
-        return pd.DataFrame(columns=['SKU_UA', 'BRAND'])
-
-    known_skus = set(_sku_to_category.keys())
-    mhl_skus = mhl_df[sku_col].fillna('').astype(str).str.strip().str.casefold()
-    unknown_mask = ~mhl_skus.isin(known_skus) & (mhl_skus != '')
-
-    unknown_df = mhl_df[unknown_mask].drop_duplicates(subset=[sku_col])
-
-    # Get brand for each unknown SKU
-    result = []
-    for _, row in unknown_df.iterrows():
-        sku = str(row.get(sku_col, '')).strip()
-        brand = str(row.get(brand_col, '')).strip() if brand_col in unknown_df.columns else ''
-        result.append({'SKU_UA': sku, 'BRAND': brand})
-
-    return pd.DataFrame(result)
-
-
-def auto_classify_sku(sku_name, brand):
-    """Auto-classify a SKU based on brand mapping.
-
-    Returns (category, confidence) where category is 'ЛІК' or 'ДД'
-    and confidence is a float 0-1.
+    Maps brand through DB_BRAND_TO_TEMPLATE, then checks
+    if template brand is in LIK or DD template lists.
     """
     if not brand:
-        return None, 0.0
+        return None
 
     brand_clean = str(brand).strip()
-    brand_lower = brand_clean.lower()
 
-    # Check DB_BRAND_TO_TEMPLATE mapping
-    from config import DB_BRAND_TO_TEMPLATE, LIK_BRANDS_TEMPLATE, DD_BRANDS_TEMPLATE
-
-    # Direct match in mapping (case-sensitive first, then case-insensitive)
+    # Try direct mapping
     template_brand = DB_BRAND_TO_TEMPLATE.get(brand_clean)
     if not template_brand:
         # Try case-insensitive lookup
         for k, v in DB_BRAND_TO_TEMPLATE.items():
-            if k.lower() == brand_lower:
+            if k.lower() == brand_clean.lower():
                 template_brand = v
                 break
 
     if template_brand:
         if template_brand in LIK_BRANDS_TEMPLATE:
-            return 'ЛІК', 0.95
+            return 'ЛІК'
         elif template_brand in DD_BRANDS_TEMPLATE:
-            return 'ДД', 0.95
+            return 'ДД'
 
-    # Check if brand directly matches a template brand (case-insensitive)
-    for t_brand in LIK_BRANDS_TEMPLATE:
-        if brand_lower == t_brand.lower():
-            return 'ЛІК', 0.9
-    for t_brand in DD_BRANDS_TEMPLATE:
-        if brand_lower == t_brand.lower():
-            return 'ДД', 0.9
+    # If brand is already a template brand (direct match)
+    if brand_clean in LIK_BRANDS_TEMPLATE:
+        return 'ЛІК'
+    if brand_clean in DD_BRANDS_TEMPLATE:
+        return 'ДД'
 
-    # Fallback: check brand name keywords
-    lik_keywords = ['лік', 'lik', 'pharma', 'farm', 'medic', 'drug', 'tablet', 'capsule', 'ampul', 'ampoule', 'vial', 'syringe', 'інфуз', 'ін’єкц', 'інжекц', 'інфузі', 'інфузія']
-    dd_keywords = ['дд', 'dd', 'cosmetic', 'косметик', 'derma', 'дерма', 'skin', 'шкір', 'cream', 'крем', 'gel', 'гель', 'ointment', 'мазь', 'lotion', 'лосьйон', 'shampoo', 'шампунь', 'soap', 'мило', 'sunscreen', 'сонцезах', 'suncare', 'sun care', 'сенсідерм', 'sensiderm']
-
-    lik_score = sum(1 for kw in lik_keywords if kw in brand_lower)
-    dd_score = sum(1 for kw in dd_keywords if kw in brand_lower)
-
-    if lik_score > dd_score and lik_score > 0:
-        return 'ЛІК', 0.6
-    elif dd_score > lik_score and dd_score > 0:
-        return 'ДД', 0.6
-
-    return None, 0.0
+    return None
 
 
-def bulk_import_unknown_skus(mhl_df, sku_col='SKU_UA', brand_col='BRAND', auto_classify=True):
-    """Import unknown SKUs from MHL data into classification.
+# Backward compatibility - these now return brand lists instead of SKU lists
+def get_mhl_lik_sku():
+    """Get list of LIC template brands (for backward compatibility)."""
+    return list(LIK_BRANDS_TEMPLATE)
+
+
+def get_mhl_dd_sku():
+    """Get list of DD template brands (for backward compatibility)."""
+    return list(DD_BRANDS_TEMPLATE)
+
+
+def get_mhl_lik_sku_list():
+    """Backward compatible function returning LIC brand list."""
+    return get_mhl_lik_sku()
+
+
+def get_mhl_dd_sku_list():
+    """Backward compatible function returning DD brand list."""
+    return get_mhl_dd_sku()
+
+
+def get_db_brands_for_category(template_brands):
+    """
+    Get database brand names for a category (ЛІК or ДД).
 
     Args:
-        mhl_df: MHL dataframe
-        sku_col: SKU column name
-        brand_col: Brand column name
-        auto_classify: If True, try to auto-classify; if False, mark as inactive for manual review
+        template_brands: Either LIK_BRANDS_TEMPLATE or DD_BRANDS_TEMPLATE
 
     Returns:
-        dict with 'imported', 'skipped', 'errors' counts and 'details' list
+        Set of database brand names that map to the given template brands
     """
-    unknown_df = get_unknown_skus_with_brands(mhl_df, sku_col, brand_col)
+    # Build reverse mapping: template brand -> set of db brands
+    template_to_db = {}
+    for db_brand, template_brand in DB_BRAND_TO_TEMPLATE.items():
+        if template_brand not in template_to_db:
+            template_to_db[template_brand] = set()
+        template_to_db[template_brand].add(db_brand)
 
-    if unknown_df.empty:
-        return {'imported': 0, 'skipped': 0, 'errors': 0, 'details': []}
-
-    imported = 0
-    skipped = 0
-    errors = 0
-    details = []
-
-    for _, row in unknown_df.iterrows():
-        sku = row['SKU_UA']
-        brand = row['BRAND']
-
-        if not sku:
-            skipped += 1
-            details.append({'sku': sku, 'brand': brand, 'status': 'skipped', 'reason': 'Empty SKU'})
-            continue
-
-        category = ''
-        active = False
-
-        if auto_classify:
-            cat, confidence = auto_classify_sku(sku, brand)
-            if cat and confidence >= 0.7:
-                category = cat
-                active = True
-            else:
-                # Low confidence - mark inactive for manual review
-                category = 'ЛІК'  # default
-                active = False
-        else:
-            # Manual review mode
-            category = 'ЛІК'  # default
-            active = False
-
-        try:
-            save_sku_classification(sku, brand, category, active)
-            imported += 1
-            details.append({
-                'sku': sku,
-                'brand': brand,
-                'status': 'imported',
-                'category': category,
-                'active': active,
-                'auto_classified': auto_classify and category != ''
-            })
-        except Exception as e:
-            errors += 1
-            details.append({'sku': sku, 'brand': brand, 'status': 'error', 'reason': str(e)})
-
-    return {'imported': imported, 'skipped': skipped, 'errors': errors, 'details': details}
+    db_brands = set()
+    for template_brand in template_brands:
+        db_brands.update(template_to_db.get(template_brand, set()))
+    return db_brands
 
 
-# Initialize legacy lists on module import
-_init_legacy_sku_lists()
+def get_mhl_lik_brands():
+    """Get database brand names for ЛІК category."""
+    return get_db_brands_for_category(LIK_BRANDS_TEMPLATE)
+
+
+def get_mhl_dd_brands():
+    """Get database brand names for ДД category."""
+    return get_db_brands_for_category(DD_BRANDS_TEMPLATE)
 
 
 # ============================================================
@@ -965,14 +687,14 @@ def get_mhl_availability_sum(mhl_df, template_brands):
         return 0.0
 
     work_df = mhl_df.copy()
-    sku_col = 'SKU_UA' if 'SKU_UA' in work_df.columns else 'Назва товару'
 
-    # Filter MHL data for relevant SKUs using dynamic classification
+    # Filter MHL data by brand using dynamic classification
     is_lic = template_brands == LIK_BRANDS_TEMPLATE
-    allowed_skus = get_mhl_lik_sku() if is_lic else get_mhl_dd_sku()
-    allowed_values = {str(v).strip().casefold() for v in allowed_skus}
-    sku_values = work_df[sku_col].fillna('').astype(str).str.strip().str.casefold()
-    work_df = work_df[sku_values.isin(allowed_values)].copy()
+    allowed_brands = get_mhl_lik_brands() if is_lic else get_mhl_dd_brands()
+    # BRAND column in MHL data contains database brand names
+    brand_col = 'BRAND' if 'BRAND' in work_df.columns else 'brand'
+    brand_values = work_df[brand_col].fillna('').astype(str).str.strip()
+    work_df = work_df[brand_values.isin(allowed_brands)].copy()
 
     if work_df.empty:
         return 0.0
@@ -1243,13 +965,12 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
     mhl_data_rows = []
     if mhl_df is not None and not mhl_df.empty:
         work_df = mhl_df.copy()
-        sku_col = 'SKU_UA' if 'SKU_UA' in work_df.columns else 'Назва товару'
 
         is_lic_category = template_brands == LIK_BRANDS_TEMPLATE
-        allowed_skus = get_mhl_lik_sku() if is_lic_category else get_mhl_dd_sku()
-        allowed_values = {str(v).strip().casefold() for v in allowed_skus}
-        sku_values = work_df[sku_col].fillna('').astype(str).str.strip().str.casefold()
-        work_df = work_df[sku_values.isin(allowed_values)].copy()
+        allowed_brands = get_mhl_lik_brands() if is_lic_category else get_mhl_dd_brands()
+        brand_col = 'BRAND' if 'BRAND' in work_df.columns else 'brand'
+        brand_values = work_df[brand_col].fillna('').astype(str).str.strip()
+        work_df = work_df[brand_values.isin(allowed_brands)].copy()
 
         if not work_df.empty:
             # Convert numeric columns, keeping track of which were originally NULL
@@ -1554,25 +1275,31 @@ def set_tma_auth_amount(chain_name, is_lic, amount):
 
 
 def get_all_sku_for_category(template_brands):
-    """Get all SKUs for a category (ЛІК or ДД) from classification with their brands and prices."""
-    from convertor import get_mhl_lik_sku, get_mhl_dd_sku, LIK_BRANDS_TEMPLATE, DD_BRANDS_TEMPLATE
-
+    """Get all brands for a category (ЛІК or ДД) with their prices."""
     # Determine which category based on template brands
     is_lic = template_brands == LIK_BRANDS_TEMPLATE
 
     if is_lic:
-        sku_list = get_mhl_lik_sku()
+        db_brands = get_mhl_lik_brands()
     else:
-        sku_list = get_mhl_dd_sku()
+        db_brands = get_mhl_dd_brands()
 
-    # Build list of (sku_name, brand, price)
+    # Build list of (brand, template_brand, price)
+    # We need to map DB brands back to template brands for display
+    template_to_db = {}
+    for db_brand, template_brand in DB_BRAND_TO_TEMPLATE.items():
+        if template_brand not in template_to_db:
+            template_to_db[template_brand] = []
+        template_to_db[template_brand].append(db_brand)
+
     result = []
-    for sku in sku_list:
-        brand = get_sku_brand(sku)
-        price = get_la_price(brand)
+    for db_brand in db_brands:
+        # Find the template brand this DB brand maps to
+        template_brand = DB_BRAND_TO_TEMPLATE.get(db_brand, db_brand)
+        price = get_la_price(template_brand)
         result.append({
-            'sku': sku,
-            'brand': brand,
+            'brand': db_brand,
+            'template_brand': template_brand,
             'price': price
         })
     return result
@@ -1684,10 +1411,11 @@ def fill_tma_worksheet(ws, template_brands, period_start, period_end, executor_n
     if mapping_df is not None and not mapping_df.empty:
         sku_col = 'SKU_UA' if 'SKU_UA' in mapping_df.columns else 'Назва товару'
         work_df = mapping_df.copy()
-        # Filter to relevant SKUs
-        allowed_skus = {str(v).strip().casefold() for v in (get_mhl_lik_sku() if is_lic else get_mhl_dd_sku())}
-        sku_values = work_df[sku_col].fillna('').astype(str).str.strip().str.casefold()
-        work_df = work_df[sku_values.isin(allowed_skus)].copy()
+        # Filter to relevant brands
+        allowed_brands = get_mhl_lik_brands() if is_lic else get_mhl_dd_brands()
+        brand_col = 'BRAND' if 'BRAND' in work_df.columns else 'brand'
+        brand_values = work_df[brand_col].fillna('').astype(str).str.strip()
+        work_df = work_df[brand_values.isin(allowed_brands)].copy()
 
         if not work_df.empty:
             for column in ['PRICE_CP', 'SUPPLY', 'DRUG_ID']:
@@ -1705,9 +1433,10 @@ def fill_tma_worksheet(ws, template_brands, period_start, period_end, executor_n
     if mhl_df is not None and not mhl_df.empty:
         sku_col = 'SKU_UA' if 'SKU_UA' in mhl_df.columns else 'Назва товару'
         work_df = mhl_df.copy()
-        allowed_skus = {str(v).strip().casefold() for v in (get_mhl_lik_sku() if is_lic else get_mhl_dd_sku())}
-        sku_values = work_df[sku_col].fillna('').astype(str).str.strip().str.casefold()
-        work_df = work_df[sku_values.isin(allowed_skus)].copy()
+        allowed_brands = get_mhl_lik_brands() if is_lic else get_mhl_dd_brands()
+        brand_col = 'BRAND' if 'BRAND' in work_df.columns else 'brand'
+        brand_values = work_df[brand_col].fillna('').astype(str).str.strip()
+        work_df = work_df[brand_values.isin(allowed_brands)].copy()
 
         if not work_df.empty:
             for column in ['PRICE_CP', 'SUPPLY']:
@@ -2347,31 +2076,41 @@ def mhl_brand_counts(df):
     if df is None or df.empty or 'SKU_UA' not in df.columns:
         return 0, 0, 0
 
-    load_sku_classification()
-    sku_names = df['SKU_UA'].fillna('').astype(str).str.strip().str.casefold()
+    # Use brand-based filtering
+    brand_col = 'BRAND' if 'BRAND' in df.columns else 'brand'
+    if brand_col not in df.columns:
+        return 0, 0, 0
 
-    lik_skus = {str(v).strip().casefold() for v in get_mhl_lik_sku()}
-    dd_skus = {str(v).strip().casefold() for v in get_mhl_dd_sku()}
+    brand_names = df[brand_col].fillna('').astype(str).str.strip()
 
-    lik_match = sku_names.isin(lik_skus)
-    dd_match = sku_names.isin(dd_skus)
+    lik_brands = get_mhl_lik_brands()
+    dd_brands = get_mhl_dd_brands()
+
+    lik_match = brand_names.isin(lik_brands)
+    dd_match = brand_names.isin(dd_brands)
     return int(lik_match.sum()), int(dd_match.sum()), int(
         (~(lik_match | dd_match)).sum()
     )
 
 
 def mhl_unknown_samples(df, limit=8):
-    """Return real database values that are not classified by the lists."""
+    """Return real database values that are not classified by the brand lists."""
     if df is None or df.empty:
         return []
 
-    load_sku_classification()
-    sku_names = df['SKU_UA'].fillna('').astype(str).str.strip()
+    brand_col = 'BRAND' if 'BRAND' in df.columns else 'brand'
+    if brand_col not in df.columns:
+        return []
 
-    known = set(_sku_to_category.keys())
+    brand_names = df[brand_col].fillna('').astype(str).str.strip()
+
+    lik_brands = get_mhl_lik_brands()
+    dd_brands = get_mhl_dd_brands()
+    known_brands = lik_brands | dd_brands
+
     unknown = df.loc[
-        ~sku_names.str.casefold().isin(known),
-        ['BRAND', 'SKU_UA'],
+        ~brand_names.isin(known_brands),
+        [brand_col, 'SKU_UA'],
     ].drop_duplicates()
     return [
         f'{brand} / {sku}'
