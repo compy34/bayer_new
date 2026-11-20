@@ -1274,8 +1274,12 @@ def set_tma_auth_amount(chain_name, is_lic, amount):
     return save_tma_auth(auth_data)
 
 
-def get_all_sku_for_category(template_brands):
-    """Get all brands for a category (ЛІК or ДД) with their prices."""
+def get_all_sku_for_category(template_brands, mhl_df=None):
+    """Get all SKUs for a category (ЛІК or ДД) from MHL data with their brands and prices.
+
+    If mhl_df is provided, extracts actual SKUs from MHL data for the category's brands.
+    Otherwise, returns brand-level info (for backward compatibility with non-TMA uses).
+    """
     # Determine which category based on template brands
     is_lic = template_brands == LIK_BRANDS_TEMPLATE
 
@@ -1284,8 +1288,36 @@ def get_all_sku_for_category(template_brands):
     else:
         db_brands = get_mhl_dd_brands()
 
-    # Build list of (brand, template_brand, price)
-    # We need to map DB brands back to template brands for display
+    # If MHL data is provided, extract actual SKUs from it
+    if mhl_df is not None and not mhl_df.empty:
+        sku_col = 'SKU_UA' if 'SKU_UA' in mhl_df.columns else 'Назва товару'
+        brand_col = 'BRAND' if 'BRAND' in mhl_df.columns else 'brand'
+
+        # Filter MHL data by category brands
+        work_df = mhl_df.copy()
+        brand_values = work_df[brand_col].fillna('').astype(str).str.strip()
+        work_df = work_df[brand_values.isin(db_brands)].copy()
+
+        if not work_df.empty:
+            # Get unique SKUs with their brands
+            result = []
+            seen = set()
+            for _, row in work_df.iterrows():
+                sku_name = str(row.get(sku_col, '')).strip()
+                db_brand = str(row.get(brand_col, '')).strip()
+                if sku_name and sku_name not in seen:
+                    seen.add(sku_name)
+                    template_brand = DB_BRAND_TO_TEMPLATE.get(db_brand, db_brand)
+                    price = get_la_price(template_brand)
+                    result.append({
+                        'sku': sku_name,
+                        'brand': db_brand,
+                        'template_brand': template_brand,
+                        'price': price
+                    })
+            return result
+
+    # Fallback: return brand-level info (for cases without MHL data)
     template_to_db = {}
     for db_brand, template_brand in DB_BRAND_TO_TEMPLATE.items():
         if template_brand not in template_to_db:
@@ -1294,10 +1326,10 @@ def get_all_sku_for_category(template_brands):
 
     result = []
     for db_brand in db_brands:
-        # Find the template brand this DB brand maps to
         template_brand = DB_BRAND_TO_TEMPLATE.get(db_brand, db_brand)
         price = get_la_price(template_brand)
         result.append({
+            'sku': '',  # No specific SKU without MHL data
             'brand': db_brand,
             'template_brand': template_brand,
             'price': price
@@ -1395,7 +1427,9 @@ def fill_tma_worksheet(ws, template_brands, period_start, period_end, executor_n
     row += 1
 
     # --- Get all SKUs for this category ---
-    sku_data = get_all_sku_for_category(template_brands)
+    # Use full_mhl_df for complete SKU list across all pharmacies, fallback to mhl_df
+    mapping_df = full_mhl_df if full_mhl_df is not None else mhl_df
+    sku_data = get_all_sku_for_category(template_brands, mapping_df)
 
     # --- Try to get PRICE_CP from MHL data for each SKU ---
     # Build a map of SKU -> PRICE_CP from MHL data (filtered by pharmacy)
