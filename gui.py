@@ -260,14 +260,14 @@ class SettingsDialog(tk.Toplevel):
 
     def _sync_skus_from_db(self):
         """Sync unknown SKUs from loaded MHL data into classification."""
-        if self.df_mhl is None or self.df_mhl.empty:
+        if self.app.df_mhl is None or self.app.df_mhl.empty:
             messagebox.showinfo('Синхронізація', 'Спочатку завантажте дані (МХЛ) для пошуку нових SKU.', parent=self)
             return
 
         from convertor import get_unknown_skus_with_brands, bulk_import_unknown_skus
 
         # Get unknown SKUs with brands
-        unknown_df = get_unknown_skus_with_brands(self.df_mhl)
+        unknown_df = get_unknown_skus_with_brands(self.app.df_mhl)
 
         if unknown_df.empty:
             messagebox.showinfo('Синхронізація', 'Нових SKU для імпорту не знайдено.', parent=self)
