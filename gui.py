@@ -203,8 +203,12 @@ class SettingsDialog(tk.Toplevel):
         toolbar.pack(fill='x', pady=(0, 8))
 
         ModernButton(toolbar, text='➕ Додати SKU', style='primary', command=self._add_sku).pack(side='left', padx=(0, 8))
-        ModernButton(toolbar, text='💾 Зберегти зміни', style='success', command=self._save_sku_changes).pack(side='left', padx=(0, 8))
         ModernButton(toolbar, text='🔄 Оновити', style='secondary', command=self._refresh_sku_table).pack(side='left')
+
+        # Info label
+        info_label = tk.Label(toolbar, text='ℹ️ Зміни зберігаються автоматично при натисканні "Зберегти" у діалозі',
+                              font=FONT_SMALL, bg=BG_COLOR, fg=TEXT_MUTED)
+        info_label.pack(side='left', padx=(16, 0))
 
         # Table
         table_frame = tk.Frame(parent, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
@@ -348,9 +352,6 @@ class SettingsDialog(tk.Toplevel):
                 # Deactivate instead of delete
                 save_sku_classification(sku, '', '', False)
             self._refresh_sku_table()
-
-    def _save_sku_changes(self):
-        messagebox.showinfo('Збережено', 'Зміни автоматично зберігаються при редагуванні', parent=self)
 
     def _build_tma_tab(self, parent):
         """TMA Authorization per pharmacy."""
