@@ -651,7 +651,7 @@ class SettingsDialog(tk.Toplevel):
         debug_frame = tk.Frame(parent, bg=BG_COLOR)
         debug_frame.pack(fill='x', pady=(PAD_Y, 0))
         ModernButton(debug_frame, text='🔍 Показати бренди в MHL даних', style='secondary',
-                    command=self._show_mhl_brands).pack(side='left')
+                    command=self.app._show_mhl_brands).pack(side='left')
 
         # --- LA_Price File (Service Prices) ---
         tk.Label(parent, text='Файл цін послуг (LA_Price):', font=FONT_SUBTITLE, bg=BG_COLOR, fg=TEXT_MAIN).pack(anchor='w', pady=(PAD_Y, 4))
