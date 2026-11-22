@@ -931,6 +931,8 @@ class SettingsDialog(tk.Toplevel):
         tk.Frame(toolbar, bg=BG_COLOR, width=20).pack(side='left')  # spacer
         ModernButton(toolbar, text='🔄 В ЛІК', style='success', command=lambda: self._bulk_change_category('ЛІК')).pack(side='left', padx=(8, 0))
         ModernButton(toolbar, text='🔄 В ДД', style='warning', command=lambda: self._bulk_change_category('ДД')).pack(side='left', padx=(8, 0))
+        tk.Frame(toolbar, bg=BG_COLOR, width=20).pack(side='left')  # spacer
+        ModernButton(toolbar, text='🗑 Видалити', style='danger', command=self._delete_selected_skus).pack(side='left', padx=(8, 0))
 
         # File selector for "для договорів" file
         file_frame = tk.Frame(parent, bg=BG_COLOR)

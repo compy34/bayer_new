@@ -17,6 +17,40 @@ def _get_connection():
     return pyodbc.connect(DB_CONNECTION_STRING)
 
 
+def create_contract_skus_table():
+    """Create table for 'для договорів' SKU data if not exists.
+
+    Returns True on success, False on failure (e.g., DB not available).
+    """
+    try:
+        conn = _get_connection()
+    except Exception:
+        return False
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='contract_skus' AND xtype='U')
+            CREATE TABLE contract_skus (
+                id INT IDENTITY(1,1) PRIMARY KEY,
+                sku_ukr NVARCHAR(255) NOT NULL,
+                category NVARCHAR(10) NOT NULL CHECK (category IN ('ЛІК', 'ДД')),
+                brand NVARCHAR(255),
+                created_at DATETIME DEFAULT GETDATE(),
+                updated_at DATETIME DEFAULT GETDATE()
+            )
+        """)
+        conn.commit()
+        return True
+    except Exception:
+        return False
+    finally:
+        conn.close()
+
+
+# Table creation is lazy - call create_contract_skus_table() when needed
+# create_contract_skus_table()  # Uncomment to create on import
+
+
 def _apply_chain_filter(query: str, params: list, chain_name: str, column: str = 't.CHAIN_NAME') -> tuple:
     """Apply chain filter to query if chain_name is provided."""
     if chain_name and chain_name.strip() and chain_name.strip() != 'Усі аптеки':
