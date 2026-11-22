@@ -225,21 +225,48 @@ def load_requisites_file(filename):
     return df_req.fillna('')
 
 
-def get_all_active_skus():
-    """Get all unique SKUs with their brands from the database.
+def get_all_active_skus(period_start=None, period_end=None):
+    """Get all unique SKUs with their brands from the database that have recent activity.
+
+    Args:
+        period_start: Optional start date (YYYY-MM-DD). If not provided, uses 12 months before max date in calc_KA.
+        period_end: Optional end date (YYYY-MM-DD). If not provided, uses max date in calc_KA.
 
     Returns:
         DataFrame with columns: SKU_UA, BRAND
-        Contains all unique product names (SKU_UA) from key_SKU table
-        with their corresponding brand from calc_KA.
+        Contains unique product names (SKU_UA) from key_SKU table
+        with their corresponding brand from calc_KA, filtered to only SKUs
+        that have data in calc_KA within the specified period (active products).
     """
     connection = None
     try:
         connection = _get_connection()
 
+        # Build period filter subquery
+        period_filter = ""
+        params = []
+        if period_start and period_end:
+            period_filter = """
+                AND EXISTS (
+                    SELECT 1 FROM [dbo].[calc_KA] ka2
+                    WHERE ka2.[DRUG_ID] = sku.[DRUG_ID]
+                      AND ka2.[DATE] >= ? AND ka2.[DATE] <= ?
+                )
+            """
+            params.extend([period_start, period_end])
+        else:
+            # Default: last 12 months from max date in calc_KA
+            period_filter = """
+                AND EXISTS (
+                    SELECT 1 FROM [dbo].[calc_KA] ka2
+                    WHERE ka2.[DRUG_ID] = sku.[DRUG_ID]
+                      AND ka2.[DATE] >= DATEADD(MONTH, -12, (SELECT MAX([DATE]) FROM [dbo].[calc_KA]))
+                )
+            """
+
         # Get all unique SKU-Brand pairs from the database
         # key_SKU has SKU_UA and DRUG_ID, calc_KA has DRUG_ID and BRAND
-        query = """
+        query = f"""
             SELECT DISTINCT
                 sku.[SKU_UA],
                 ka.[BRAND]
@@ -250,9 +277,10 @@ def get_all_active_skus():
               AND sku.[SKU_UA] <> ''
               AND ka.[BRAND] IS NOT NULL
               AND ka.[BRAND] <> ''
+              {period_filter}
         """
 
-        df = pd.read_sql(query, connection)
+        df = pd.read_sql(query, connection, params=params)
         # Clean up
         df['SKU_UA'] = df['SKU_UA'].astype(str).str.strip()
         df['BRAND'] = df['BRAND'].astype(str).str.strip()
