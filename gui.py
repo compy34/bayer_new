@@ -39,9 +39,12 @@ from convertor import (
     get_all_la_prices,
     set_la_price,
     get_mhl_unique_brands,
-    get_all_brand_classifications,
-    set_brand_category,
-    remove_brand_classification,
+    get_all_sku_classifications,
+    set_sku_classification,
+    remove_sku_classification,
+    get_sku_category_local,
+    get_combined_lik_skus,
+    get_combined_dd_skus,
 )
 from Data.Controller import get_mhl_data, get_pharmacy_data, load_requisites_file, get_tma_offtake_data, DataLoadError
 
@@ -907,11 +910,11 @@ class SettingsDialog(tk.Toplevel):
             self.la_price_preview.insert('end', f'{brand}: {price:.2f} грн.\n')
 
     def _build_brand_tab(self, parent):
-        """Brand qualification tab - assign brands to ЛІК or ДД category."""
+        """SKU qualification tab - assign products (SKU) to ЛІК or ДД category, grouped by brand."""
         tk.Label(
             parent,
-            text='Кваліфікація брендів: призначайте бренди категорії ЛІК або ДД.\n'
-                 'Ці налаштування додаються до конфігурації з config.py і мають вищий пріоритет.',
+            text='Кваліфікація продуктів (SKU): призначайте кожен продукт категорії ЛІК або ДД.\n'
+                 'Список відсортовано за брендом для зручності. Ці налаштування мають вищий пріоритет над config.py.',
             font=FONT_SMALL, bg=BG_COLOR, fg=TEXT_MUTED, wraplength=600, justify='left'
         ).pack(anchor='w', pady=(0, PAD_Y))
 
@@ -919,37 +922,38 @@ class SettingsDialog(tk.Toplevel):
         toolbar = tk.Frame(parent, bg=BG_COLOR)
         toolbar.pack(fill='x', pady=(0, 8))
 
-        ModernButton(toolbar, text='➕ Додати бренд', style='primary', command=self._add_brand).pack(side='left', padx=(0, 8))
-        ModernButton(toolbar, text='🔄 Оновити', style='secondary', command=self._refresh_brand_table).pack(side='left')
-        ModernButton(toolbar, text='📥 Завантажити з MHL', style='outline', command=self._load_brands_from_mhl).pack(side='left', padx=(8, 0))
+        ModernButton(toolbar, text='➕ Додати продукт', style='primary', command=self._add_sku).pack(side='left', padx=(0, 8))
+        ModernButton(toolbar, text='🔄 Оновити', style='secondary', command=self._refresh_sku_table).pack(side='left')
+        ModernButton(toolbar, text='📥 Завантажити з MHL', style='outline', command=self._load_skus_from_mhl).pack(side='left', padx=(8, 0))
 
         # Table
         table_frame = tk.Frame(parent, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
         table_frame.pack(fill='both', expand=True)
 
-        columns = ('BRAND', 'CATEGORY')
-        self.brand_tree = ttk.Treeview(table_frame, columns=columns, show='headings', selectmode='extended')
+        columns = ('SKU', 'BRAND', 'CATEGORY')
+        self.sku_tree = ttk.Treeview(table_frame, columns=columns, show='headings', selectmode='extended')
 
         col_config = {
-            'BRAND': ('Бренд (назва в базі даних)', 400),
-            'CATEGORY': ('Категорія', 120),
+            'SKU': ('Продукт (SKU)', 350),
+            'BRAND': ('Бренд', 200),
+            'CATEGORY': ('Категорія', 100),
         }
         for col, (title, width) in col_config.items():
-            self.brand_tree.heading(col, text=title)
-            self.brand_tree.column(col, width=width, anchor='w' if col != 'CATEGORY' else 'center')
+            self.sku_tree.heading(col, text=title)
+            self.sku_tree.column(col, width=width, anchor='w' if col != 'CATEGORY' else 'center')
 
-        vsb = ttk.Scrollbar(table_frame, orient='vertical', command=self.brand_tree.yview)
-        hsb = ttk.Scrollbar(table_frame, orient='horizontal', command=self.brand_tree.xview)
-        self.brand_tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+        vsb = ttk.Scrollbar(table_frame, orient='vertical', command=self.sku_tree.yview)
+        hsb = ttk.Scrollbar(table_frame, orient='horizontal', command=self.sku_tree.xview)
+        self.sku_tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
 
-        self.brand_tree.grid(row=0, column=0, sticky='nsew')
+        self.sku_tree.grid(row=0, column=0, sticky='nsew')
         vsb.grid(row=0, column=1, sticky='ns')
         hsb.grid(row=1, column=0, sticky='ew')
         table_frame.grid_rowconfigure(0, weight=1)
         table_frame.grid_columnconfigure(0, weight=1)
 
-        self.brand_tree.bind('<Double-1>', self._on_brand_double_click)
-        self.brand_tree.bind('<Delete>', lambda e: self._delete_selected_brands())
+        self.sku_tree.bind('<Double-1>', self._on_sku_double_click)
+        self.sku_tree.bind('<Delete>', lambda e: self._delete_selected_skus())
 
         # Legend
         legend_frame = tk.Frame(parent, bg=BG_COLOR)
@@ -959,39 +963,39 @@ class SettingsDialog(tk.Toplevel):
         tk.Label(legend_frame, text='🟧 ДД = Не лікарські засоби', font=FONT_SMALL, bg=BG_COLOR, fg='#e67e22').pack(side='left', padx=(0, 8))
         tk.Label(legend_frame, text='(подвійний клік для редагування, Delete для видалення)', font=FONT_SMALL, bg=BG_COLOR, fg=TEXT_MUTED).pack(side='left', padx=(16, 0))
 
-        self._refresh_brand_table()
+        self._refresh_sku_table()
 
-    def _refresh_brand_table(self):
-        for item in self.brand_tree.get_children():
-            self.brand_tree.delete(item)
-        df = get_all_brand_classifications()
+    def _refresh_sku_table(self):
+        for item in self.sku_tree.get_children():
+            self.sku_tree.delete(item)
+        df = get_all_sku_classifications()
         for _, row in df.iterrows():
             cat = row['CATEGORY']
             # Color coding by category
-            item = self.brand_tree.insert('', 'end', values=(row['BRAND'], cat))
+            item = self.sku_tree.insert('', 'end', values=(row['SKU'], row['BRAND'], cat))
             if cat == 'ЛІК':
-                self.brand_tree.item(item, tags=('lik',))
+                self.sku_tree.item(item, tags=('lik',))
             elif cat == 'ДД':
-                self.brand_tree.item(item, tags=('dd',))
+                self.sku_tree.item(item, tags=('dd',))
         # Configure tags for color
-        self.brand_tree.tag_configure('lik', foreground='#1a56a0')
-        self.brand_tree.tag_configure('dd', foreground='#e67e22')
+        self.sku_tree.tag_configure('lik', foreground='#1a56a0')
+        self.sku_tree.tag_configure('dd', foreground='#e67e22')
 
-    def _on_brand_double_click(self, event):
-        item = self.brand_tree.selection()[0] if self.brand_tree.selection() else None
+    def _on_sku_double_click(self, event):
+        item = self.sku_tree.selection()[0] if self.sku_tree.selection() else None
         if not item:
             return
-        values = self.brand_tree.item(item, 'values')
-        self._edit_brand_dialog(values)
+        values = self.sku_tree.item(item, 'values')
+        self._edit_sku_dialog(values)
 
-    def _add_brand(self):
-        self._edit_brand_dialog()
+    def _add_sku(self):
+        self._edit_sku_dialog()
 
-    def _edit_brand_dialog(self, values=None):
-        """Dialog to add/edit brand classification."""
+    def _edit_sku_dialog(self, values=None):
+        """Dialog to add/edit SKU classification."""
         dialog = tk.Toplevel(self)
-        dialog.title('Редагувати бренд' if values else 'Додати бренд')
-        dialog.geometry('420x220')
+        dialog.title('Редагувати продукт' if values else 'Додати продукт')
+        dialog.geometry('500x250')
         dialog.configure(bg=BG_COLOR)
         dialog.transient(self)
         dialog.grab_set()
@@ -1003,7 +1007,8 @@ class SettingsDialog(tk.Toplevel):
 
         fields = {}
         labels = [
-            ('BRAND', 'Назва бренда (як в базі даних, обов\'язково)'),
+            ('SKU', 'Назва продукту / SKU (як в базі даних, обов\'язково)'),
+            ('BRAND', 'Бренд (для групування в списку)'),
             ('CATEGORY', 'Категорія (ЛІК або ДД)'),
         ]
         for i, (key, label) in enumerate(labels):
@@ -1013,7 +1018,7 @@ class SettingsDialog(tk.Toplevel):
             if key == 'CATEGORY':
                 var = tk.StringVar(value='ЛІК')
                 combo = ttk.Combobox(dialog, textvariable=var, values=['ЛІК', 'ДД'],
-                                      state='readonly', font=FONT_BODY, width=45)
+                                      state='readonly', font=FONT_BODY, width=55)
                 combo.grid(row=i, column=0, sticky='ew', padx=PAD_X, pady=(0, 4))
                 fields[key] = var
             else:
@@ -1026,16 +1031,18 @@ class SettingsDialog(tk.Toplevel):
 
         # Pre-fill if editing
         if values:
-            fields['BRAND'].insert(0, values[0])
-            fields['BRAND'].config(state='readonly')
-            fields['CATEGORY'].set(values[1])
+            fields['SKU'].insert(0, values[0])
+            fields['SKU'].config(state='readonly')
+            fields['BRAND'].insert(0, values[1])
+            fields['CATEGORY'].set(values[2])
 
         def save():
-            brand = fields['BRAND'].get().strip() if isinstance(fields['BRAND'], tk.Entry) else fields['BRAND'].get().strip()
+            sku = fields['SKU'].get().strip()
+            brand = fields['BRAND'].get().strip()
             category = fields['CATEGORY'].get().strip()
 
-            if not brand:
-                messagebox.showwarning('Помилка', 'Назва бренда не може бути порожньою', parent=dialog)
+            if not sku:
+                messagebox.showwarning('Помилка', 'Назва продукту не може бути порожньою', parent=dialog)
                 return
 
             if category not in ('ЛІК', 'ДД'):
@@ -1043,60 +1050,77 @@ class SettingsDialog(tk.Toplevel):
                 return
 
             try:
-                set_brand_category(brand, category)
-                self._refresh_brand_table()
+                set_sku_classification(sku, category, brand)
+                self._refresh_sku_table()
                 dialog.destroy()
-                self.app.status_var.set(f'Бренд оновлено: {brand} = {category}')
+                self.app.status_var.set(f'Продукт оновлено: {sku} = {category}')
             except Exception as e:
                 messagebox.showerror('Помилка', f'Не вдалося зберегти: {e}', parent=dialog)
 
         btn_frame = tk.Frame(dialog, bg=BG_COLOR)
-        btn_frame.grid(row=2, column=0, sticky='ew', padx=PAD_X, pady=PAD_Y)
+        btn_frame.grid(row=3, column=0, sticky='ew', padx=PAD_X, pady=PAD_Y)
         ModernButton(btn_frame, text='Скасувати', style='secondary', command=dialog.destroy).pack(side='right', padx=(8, 0))
         ModernButton(btn_frame, text='Зберегти', style='success', command=save).pack(side='right')
 
-    def _delete_selected_brands(self):
-        selected = self.brand_tree.selection()
+    def _delete_selected_skus(self):
+        selected = self.sku_tree.selection()
         if not selected:
             return
-        if messagebox.askyesno('Підтвердження', f'Видалити {len(selected)} бренд(ів) з кваліфікації?', parent=self):
+        if messagebox.askyesno('Підтвердження', f'Видалити {len(selected)} продукт(ів) з кваліфікації?', parent=self):
             for item in selected:
-                values = self.brand_tree.item(item, 'values')
-                brand = values[0]
-                remove_brand_classification(brand)
-            self._refresh_brand_table()
+                values = self.sku_tree.item(item, 'values')
+                sku = values[0]
+                remove_sku_classification(sku)
+            self._refresh_sku_table()
 
-    def _load_brands_from_mhl(self):
-        """Load unique brands from current MHL data and add unknown ones to classification."""
+    def _load_skus_from_mhl(self):
+        """Load unique SKUs from current MHL data and add unknown ones to classification."""
         if self.app.df_mhl is None or self.app.df_mhl.empty:
             messagebox.showinfo('MHL дані', 'MHL дані не завантажені. Спочатку натисніть "Завантажити дані".', parent=self)
             return
 
-        brands = get_mhl_unique_brands(self.app.df_mhl)
-        if not brands:
-            messagebox.showinfo('MHL дані', 'Бренди не знайдені в MHL даних.', parent=self)
+        sku_col = 'SKU_UA' if 'SKU_UA' in self.app.df_mhl.columns else 'Назва товару'
+        brand_col = 'BRAND' if 'BRAND' in self.app.df_mhl.columns else 'brand'
+
+        if sku_col not in self.app.df_mhl.columns or brand_col not in self.app.df_mhl.columns:
+            messagebox.showinfo('MHL дані', 'В MHL даних відсутні колонки SKU_UA або BRAND.', parent=self)
+            return
+
+        # Get unique SKU-Brand pairs from MHL data
+        work_df = self.app.df_mhl[[sku_col, brand_col]].dropna().drop_duplicates()
+        work_df[sku_col] = work_df[sku_col].astype(str).str.strip()
+        work_df[brand_col] = work_df[brand_col].astype(str).str.strip()
+        work_df = work_df[(work_df[sku_col] != '') & (work_df[brand_col] != '')]
+
+        if work_df.empty:
+            messagebox.showinfo('MHL дані', 'SKU не знайдені в MHL даних.', parent=self)
             return
 
         # Get current classifications
-        current_df = get_all_brand_classifications()
-        current_brands = set(current_df['BRAND'].str.casefold()) if not current_df.empty else set()
+        current_df = get_all_sku_classifications()
+        current_skus = set(current_df['SKU'].str.casefold()) if not current_df.empty else set()
 
-        # Get config-based brands (already classified)
-        lik_brands = {b.casefold() for b in get_mhl_lik_brands()}
-        dd_brands = {b.casefold() for b in get_mhl_dd_brands()}
-        all_known = lik_brands | dd_brands
+        # Get config-based SKUs (from brand classification)
+        lik_skus = set()
+        dd_skus = set()
+        if self.app.df_mhl is not None:
+            lik_sku_list = get_combined_lik_skus(self.app.df_mhl)
+            dd_sku_list = get_combined_dd_skus(self.app.df_mhl)
+            lik_skus = {s['sku'].casefold() for s in lik_sku_list}
+            dd_skus = {s['sku'].casefold() for s in dd_sku_list}
+        all_known_skus = lik_skus | dd_skus
 
-        # Find unknown brands
-        unknown_brands = [b for b in brands if b.casefold() not in current_brands and b.casefold() not in all_known]
+        # Find unknown SKUs (not in local classification and not in config)
+        unknown = work_df[~work_df[sku_col].str.casefold().isin(current_skus | all_known_skus)]
 
-        if not unknown_brands:
-            messagebox.showinfo('MHL дані', 'Всі бренди вже мають кваліфікацію.', parent=self)
+        if unknown.empty:
+            messagebox.showinfo('MHL дані', 'Всі продукти вже мають кваліфікацію.', parent=self)
             return
 
-        # Show dialog to select which unknown brands to add
+        # Show dialog to select which unknown SKUs to add
         dialog = tk.Toplevel(self)
-        dialog.title('Невідомі бренди з MHL')
-        dialog.geometry('500x500')
+        dialog.title('Невідомі продукти з MHL')
+        dialog.geometry('600x500')
         dialog.configure(bg=BG_COLOR)
         dialog.transient(self)
         dialog.grab_set()
@@ -1106,10 +1130,10 @@ class SettingsDialog(tk.Toplevel):
         y = self.winfo_rooty() + (self.winfo_height() - dialog.winfo_height()) // 2
         dialog.geometry(f'+{x}+{y}')
 
-        tk.Label(dialog, text=f'Знайдено {len(unknown_brands)} невідомих брендів у MHL даних:',
+        tk.Label(dialog, text=f'Знайдено {len(unknown)} невідомих продуктів у MHL даних:',
                  font=FONT_SUBTITLE, bg=BG_COLOR, fg=TEXT_MAIN).pack(anchor='w', padx=PAD_X, pady=PAD_Y)
 
-        # List with checkboxes
+        # List with checkboxes - show SKU + Brand
         frame = tk.Frame(dialog, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
         frame.pack(fill='both', expand=True, padx=PAD_X, pady=(0, PAD_X))
 
@@ -1121,13 +1145,16 @@ class SettingsDialog(tk.Toplevel):
         canvas.create_window((0, 0), window=scrollable_frame, anchor='nw')
 
         checkboxes = {}
-        for brand in unknown_brands:
+        for _, row in unknown.iterrows():
+            sku = row[sku_col]
+            brand = row[brand_col]
+            display_text = f'{sku}  [{brand}]'
             var = tk.BooleanVar(value=True)
-            cb = tk.Checkbutton(scrollable_frame, text=brand, variable=var,
+            cb = tk.Checkbutton(scrollable_frame, text=display_text, variable=var,
                                  font=FONT_BODY, bg=SURFACE, fg=TEXT_MAIN,
                                  activebackground=SURFACE, anchor='w')
             cb.pack(fill='x', padx=8, pady=2)
-            checkboxes[brand] = var
+            checkboxes[sku] = {'var': var, 'brand': brand}
 
         scrollable_frame.update_idletasks()
         canvas.config(scrollregion=canvas.bbox('all'))
@@ -1136,23 +1163,23 @@ class SettingsDialog(tk.Toplevel):
 
         def add_selected():
             added = 0
-            for brand, var in checkboxes.items():
-                if var.get():
+            for sku, data in checkboxes.items():
+                if data['var'].get():
                     # Try to guess category from config
                     cat = None
-                    brand_lower = brand.casefold()
-                    if brand_lower in lik_brands:
+                    sku_lower = sku.casefold()
+                    if sku_lower in lik_skus:
                         cat = 'ЛІК'
-                    elif brand_lower in dd_brands:
+                    elif sku_lower in dd_skus:
                         cat = 'ДД'
                     else:
                         cat = 'ЛІК'  # default
-                    set_brand_category(brand, cat)
+                    set_sku_classification(sku, cat, data['brand'])
                     added += 1
-            self._refresh_brand_table()
+            self._refresh_sku_table()
             dialog.destroy()
-            self.app.status_var.set(f'Додано {added} бренд(ів) до кваліфікації')
-            messagebox.showinfo('Готово', f'Додано {added} бренд(ів) до кваліфікації.', parent=self)
+            self.app.status_var.set(f'Додано {added} продукт(ів) до кваліфікації')
+            messagebox.showinfo('Готово', f'Додано {added} продукт(ів) до кваліфікації.', parent=self)
 
         btn_frame = tk.Frame(dialog, bg=BG_COLOR)
         btn_frame.pack(fill='x', padx=PAD_X, pady=PAD_Y)

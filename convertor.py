@@ -155,13 +155,45 @@ def _get_config_dd_brands():
     return get_db_brands_for_category(DD_BRANDS_TEMPLATE)
 
 
+def get_combined_lik_brands():
+    """Get all database brands for ЛІК category (config + local classification) as a set.
+
+    This is for backward compatibility - returns brand names only.
+    """
+    # Start with config-based brands
+    config_brands = _get_config_lik_brands()
+
+    # Add local SKU classifications' brands
+    load_sku_classification()
+    local_lik_brands = {v.get('brand', '').casefold() for k, v in _sku_classification_cache.items()
+                         if v['category'] == 'ЛІК' and v.get('brand', '')}
+
+    return config_brands.union(local_lik_brands)
+
+
+def get_combined_dd_brands():
+    """Get all database brands for ДД category (config + local classification) as a set.
+
+    This is for backward compatibility - returns brand names only.
+    """
+    # Start with config-based brands
+    config_brands = _get_config_dd_brands()
+
+    # Add local SKU classifications' brands
+    load_sku_classification()
+    local_dd_brands = {v.get('brand', '').casefold() for k, v in _sku_classification_cache.items()
+                        if v['category'] == 'ДД' and v.get('brand', '')}
+
+    return config_brands.union(local_dd_brands)
+
+
 def get_mhl_lik_brands():
-    """Get database brand names for ЛІК category (config + local JSON classification)."""
+    """Get database brand names for ЛІК category (config + local SKU classification)."""
     return get_combined_lik_brands()
 
 
 def get_mhl_dd_brands():
-    """Get database brand names for ДД category (config + local JSON classification)."""
+    """Get database brand names for ДД category (config + local SKU classification)."""
     return get_combined_dd_brands()
 
 
@@ -2184,140 +2216,310 @@ def mhl_unknown_samples(df, limit=8):
 
 
 # ============================================================
-# BRAND CLASSIFICATION (local JSON overrides for ЛІК/ДД)
+# SKU CLASSIFICATION (local JSON overrides for ЛІК/ДД)
 # ============================================================
-# Allows users to add custom brand classifications that supplement
-# or override the config.py definitions (DB_BRAND_TO_TEMPLATE, LIK_BRANDS_TEMPLATE, DD_BRANDS_TEMPLATE)
+# Allows users to add custom SKU (product name) classifications that supplement
+# or override the config.py brand-based definitions.
+# JSON structure: {sku_name_lower: {"category": "ЛІК"/"ДД", "brand": "brand_name"}}
 
-BRAND_CLASSIFICATION_FILE = Path(__file__).resolve().parent / 'brand_classification.json'
-_brand_classification_cache = None
-_brand_classification_lock = threading.Lock()
+SKU_CLASSIFICATION_FILE = Path(__file__).resolve().parent / 'sku_classification.json'
+_sku_classification_cache = None
+_sku_classification_lock = threading.Lock()
 
 
-def load_brand_classification():
-    """Load brand classification from JSON file.
+def load_sku_classification():
+    """Load SKU classification from JSON file.
 
-    Returns dict mapping brand_name (lowercase) -> category ('ЛІК' or 'ДД')
+    Returns dict mapping sku_name (lowercase) -> {"category": "ЛІК"/"ДД", "brand": "brand_name"}
     """
-    global _brand_classification_cache
+    global _sku_classification_cache
 
-    if _brand_classification_cache is not None:
-        return _brand_classification_cache
+    if _sku_classification_cache is not None:
+        return _sku_classification_cache
 
     import json
 
-    if not BRAND_CLASSIFICATION_FILE.exists():
-        _brand_classification_cache = {}
-        return _brand_classification_cache
+    if not SKU_CLASSIFICATION_FILE.exists():
+        _sku_classification_cache = {}
+        return _sku_classification_cache
 
     try:
-        with open(BRAND_CLASSIFICATION_FILE, 'r', encoding='utf-8') as f:
+        with open(SKU_CLASSIFICATION_FILE, 'r', encoding='utf-8') as f:
             data = json.load(f)
         # Normalize keys to lowercase for case-insensitive matching
-        _brand_classification_cache = {
-            str(k).strip().casefold(): str(v).strip().upper() for k, v in data.items()
-        }
-        # Validate categories
-        valid = {'ЛІК', 'ДД'}
-        _brand_classification_cache = {
-            k: v for k, v in _brand_classification_cache.items() if v in valid
-        }
-        return _brand_classification_cache
+        # Ensure each entry has category and brand fields
+        _sku_classification_cache = {}
+        for k, v in data.items():
+            sku_key = str(k).strip().casefold()
+            if isinstance(v, dict):
+                cat = str(v.get('category', '')).strip().upper()
+                brand = str(v.get('brand', '')).strip()
+            else:
+                # Backward compatibility: old format was just category string
+                cat = str(v).strip().upper()
+                brand = ''
+            if cat in ('ЛІК', 'ДД'):
+                _sku_classification_cache[sku_key] = {'category': cat, 'brand': brand}
+        return _sku_classification_cache
     except Exception as e:
-        print(f"Error loading brand classification: {e}")
-        _brand_classification_cache = {}
-        return _brand_classification_cache
+        print(f"Error loading SKU classification: {e}")
+        _sku_classification_cache = {}
+        return _sku_classification_cache
 
 
-def _save_brand_classification(classification):
-    """Thread-safe save of brand classification to JSON."""
-    with _brand_classification_lock:
+def _save_sku_classification(classification):
+    """Thread-safe save of SKU classification to JSON."""
+    with _sku_classification_lock:
         import json
         try:
-            with open(BRAND_CLASSIFICATION_FILE, 'w', encoding='utf-8') as f:
+            with open(SKU_CLASSIFICATION_FILE, 'w', encoding='utf-8') as f:
                 json.dump(classification, f, ensure_ascii=False, indent=2)
             return True
         except Exception as e:
-            print(f"Error saving brand classification: {e}")
+            print(f"Error saving SKU classification: {e}")
             return False
 
 
-def get_brand_category_local(brand):
-    """Get category (ЛІК/ДД) for a brand from local JSON classification.
+def get_sku_category_local(sku_name):
+    """Get category (ЛІК/ДД) for a SKU from local JSON classification.
 
     Returns 'ЛІК', 'ДД', or None if not found in local classification.
     """
-    load_brand_classification()
-    if _brand_classification_cache is None:
+    load_sku_classification()
+    if _sku_classification_cache is None:
         return None
-    normalized = str(brand).strip().casefold()
-    return _brand_classification_cache.get(normalized)
+    normalized = str(sku_name).strip().casefold()
+    entry = _sku_classification_cache.get(normalized)
+    return entry['category'] if entry else None
 
 
-def set_brand_category(brand, category):
-    """Set brand category in local classification.
+def get_sku_brand_local(sku_name):
+    """Get brand for a SKU from local JSON classification.
+
+    Returns brand name or empty string if not found.
+    """
+    load_sku_classification()
+    if _sku_classification_cache is None:
+        return ''
+    normalized = str(sku_name).strip().casefold()
+    entry = _sku_classification_cache.get(normalized)
+    return entry.get('brand', '') if entry else ''
+
+
+def set_sku_classification(sku_name, category, brand=''):
+    """Set SKU classification in local JSON.
 
     Args:
-        brand: Brand name (database brand name)
+        sku_name: Product name / SKU (from SKU_UA column)
         category: 'ЛІК' or 'ДД' (case-insensitive)
+        brand: Brand name (optional, for grouping in UI)
 
     Returns True on success, False on failure.
     """
-    load_brand_classification()
-    normalized = str(brand).strip().casefold()
+    load_sku_classification()
+    normalized = str(sku_name).strip().casefold()
     cat_upper = str(category).strip().upper()
+    brand_clean = str(brand).strip()
 
     if cat_upper not in ('ЛІК', 'ДД'):
         raise ValueError(f"Invalid category: {category}. Must be 'ЛІК' or 'ДД'")
 
-    _brand_classification_cache[normalized] = cat_upper
-    return _save_brand_classification(_brand_classification_cache)
+    _sku_classification_cache[normalized] = {'category': cat_upper, 'brand': brand_clean}
+    return _save_sku_classification(_sku_classification_cache)
 
 
-def remove_brand_classification(brand):
-    """Remove brand from local classification.
+def remove_sku_classification(sku_name):
+    """Remove SKU from local classification.
 
     Returns True on success, False on failure.
     """
-    load_brand_classification()
-    normalized = str(brand).strip().casefold()
+    load_sku_classification()
+    normalized = str(sku_name).strip().casefold()
 
-    if normalized in _brand_classification_cache:
-        del _brand_classification_cache[normalized]
-        return _save_brand_classification(_brand_classification_cache)
+    if normalized in _sku_classification_cache:
+        del _sku_classification_cache[normalized]
+        return _save_sku_classification(_sku_classification_cache)
     return True
 
 
-def get_all_brand_classifications():
-    """Get all local brand classifications for management dialog."""
-    load_brand_classification()
-    if not _brand_classification_cache:
-        return pd.DataFrame(columns=['BRAND', 'CATEGORY'])
+def get_all_sku_classifications():
+    """Get all local SKU classifications for management dialog."""
+    load_sku_classification()
+    if not _sku_classification_cache:
+        return pd.DataFrame(columns=['SKU', 'BRAND', 'CATEGORY'])
     df = pd.DataFrame([
-        {'BRAND': k, 'CATEGORY': v} for k, v in _brand_classification_cache.items()
+        {'SKU': k, 'BRAND': v.get('brand', ''), 'CATEGORY': v['category']}
+        for k, v in _sku_classification_cache.items()
     ])
-    return df.sort_values('BRAND')
+    # Sort by brand, then by SKU
+    return df.sort_values(['BRAND', 'SKU'])
 
 
-def get_combined_lik_brands():
-    """Get all database brands for ЛІК category (config + local classification)."""
+def get_combined_lik_skus(mhl_df=None):
+    """Get all SKUs for ЛІК category (config-based brands + local SKU classification).
+
+    If mhl_df is provided, extracts actual SKUs from MHL data.
+    Otherwise, returns brand-level info from config.
+    """
     # Start with config-based brands
     config_brands = _get_config_lik_brands()
 
-    # Add local classification brands
-    load_brand_classification()
-    local_lik = {b for b, cat in _brand_classification_cache.items() if cat == 'ЛІК'}
+    # Add local SKU classifications
+    load_sku_classification()
+    local_lik_skus = {k for k, v in _sku_classification_cache.items() if v['category'] == 'ЛІК'}
 
-    return config_brands.union(local_lik)
+    if mhl_df is not None and not mhl_df.empty:
+        # Extract actual SKUs from MHL data for config brands
+        sku_col = 'SKU_UA' if 'SKU_UA' in mhl_df.columns else 'Назва товару'
+        brand_col = 'BRAND' if 'BRAND' in mhl_df.columns else 'brand'
+
+        work_df = mhl_df.copy()
+        brand_values = work_df[brand_col].fillna('').astype(str).str.strip()
+        config_brands_lower = {b.lower() for b in config_brands}
+        work_df = work_df[brand_values.str.lower().isin(config_brands_lower)].copy()
+
+        if not work_df.empty:
+            # Get unique SKUs with their brands
+            result = []
+            seen = set()
+            for _, row in work_df.iterrows():
+                sku_name = str(row.get(sku_col, '')).strip()
+                db_brand = str(row.get(brand_col, '')).strip()
+                if sku_name and sku_name not in seen:
+                    seen.add(sku_name)
+                    # Check local classification first
+                    local_cat = get_sku_category_local(sku_name)
+                    if local_cat:
+                        cat = local_cat
+                    else:
+                        cat = 'ЛІК'  # default from config
+                    template_brand = DB_BRAND_TO_TEMPLATE.get(db_brand, db_brand)
+                    price = get_la_price(template_brand)
+                    result.append({
+                        'sku': sku_name,
+                        'brand': db_brand,
+                        'category': cat,
+                        'template_brand': template_brand,
+                        'price': price
+                    })
+
+            # Also add local SKUs that might not be in current MHL data
+            mhl_skus = {r['sku'].casefold() for r in result}
+            for sku_key in local_lik_skus:
+                if sku_key not in mhl_skus:
+                    brand = get_sku_brand_local(sku_key)
+                    # Try to find brand in MHL data
+                    if not brand and mhl_df is not None:
+                        matches = mhl_df[mhl_df[sku_col].fillna('').astype(str).str.strip().str.casefold() == sku_key]
+                        if not matches.empty:
+                            brand = str(matches.iloc[0][brand_col]).strip()
+                    template_brand = DB_BRAND_TO_TEMPLATE.get(brand, brand) if brand else sku_key
+                    price = get_la_price(template_brand)
+                    result.append({
+                        'sku': sku_key,
+                        'brand': brand,
+                        'category': 'ЛІК',
+                        'template_brand': template_brand,
+                        'price': price
+                    })
+            return result
+
+    # Fallback: return SKU info from local classification only
+    result = []
+    for sku_key in local_lik_skus:
+        brand = get_sku_brand_local(sku_key)
+        template_brand = DB_BRAND_TO_TEMPLATE.get(brand, brand) if brand else sku_key
+        price = get_la_price(template_brand)
+        result.append({
+            'sku': sku_key,
+            'brand': brand,
+            'category': 'ЛІК',
+            'template_brand': template_brand,
+            'price': price
+        })
+    return result
 
 
-def get_combined_dd_brands():
-    """Get all database brands for ДД category (config + local classification)."""
+def get_combined_dd_skus(mhl_df=None):
+    """Get all SKUs for ДД category (config-based brands + local SKU classification).
+
+    If mhl_df is provided, extracts actual SKUs from MHL data.
+    Otherwise, returns brand-level info from config.
+    """
     # Start with config-based brands
     config_brands = _get_config_dd_brands()
 
-    # Add local classification brands
-    load_brand_classification()
-    local_dd = {b for b, cat in _brand_classification_cache.items() if cat == 'ДД'}
+    # Add local SKU classifications
+    load_sku_classification()
+    local_dd_skus = {k for k, v in _sku_classification_cache.items() if v['category'] == 'ДД'}
 
-    return config_brands.union(local_dd)
+    if mhl_df is not None and not mhl_df.empty:
+        # Extract actual SKUs from MHL data for config brands
+        sku_col = 'SKU_UA' if 'SKU_UA' in mhl_df.columns else 'Назва товару'
+        brand_col = 'BRAND' if 'BRAND' in mhl_df.columns else 'brand'
+
+        work_df = mhl_df.copy()
+        brand_values = work_df[brand_col].fillna('').astype(str).str.strip()
+        config_brands_lower = {b.lower() for b in config_brands}
+        work_df = work_df[brand_values.str.lower().isin(config_brands_lower)].copy()
+
+        if not work_df.empty:
+            # Get unique SKUs with their brands
+            result = []
+            seen = set()
+            for _, row in work_df.iterrows():
+                sku_name = str(row.get(sku_col, '')).strip()
+                db_brand = str(row.get(brand_col, '')).strip()
+                if sku_name and sku_name not in seen:
+                    seen.add(sku_name)
+                    # Check local classification first
+                    local_cat = get_sku_category_local(sku_name)
+                    if local_cat:
+                        cat = local_cat
+                    else:
+                        cat = 'ДД'  # default from config
+                    template_brand = DB_BRAND_TO_TEMPLATE.get(db_brand, db_brand)
+                    price = get_la_price(template_brand)
+                    result.append({
+                        'sku': sku_name,
+                        'brand': db_brand,
+                        'category': cat,
+                        'template_brand': template_brand,
+                        'price': price
+                    })
+
+            # Also add local SKUs that might not be in current MHL data
+            mhl_skus = {r['sku'].casefold() for r in result}
+            for sku_key in local_dd_skus:
+                if sku_key not in mhl_skus:
+                    brand = get_sku_brand_local(sku_key)
+                    # Try to find brand in MHL data
+                    if not brand and mhl_df is not None:
+                        matches = mhl_df[mhl_df[sku_col].fillna('').astype(str).str.strip().str.casefold() == sku_key]
+                        if not matches.empty:
+                            brand = str(matches.iloc[0][brand_col]).strip()
+                    template_brand = DB_BRAND_TO_TEMPLATE.get(brand, brand) if brand else sku_key
+                    price = get_la_price(template_brand)
+                    result.append({
+                        'sku': sku_key,
+                        'brand': brand,
+                        'category': 'ДД',
+                        'template_brand': template_brand,
+                        'price': price
+                    })
+            return result
+
+    # Fallback: return SKU info from local classification only
+    result = []
+    for sku_key in local_dd_skus:
+        brand = get_sku_brand_local(sku_key)
+        template_brand = DB_BRAND_TO_TEMPLATE.get(brand, brand) if brand else sku_key
+        price = get_la_price(template_brand)
+        result.append({
+            'sku': sku_key,
+            'brand': brand,
+            'category': 'ДД',
+            'template_brand': template_brand,
+            'price': price
+        })
+    return result
