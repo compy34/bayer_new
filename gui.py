@@ -1477,10 +1477,28 @@ class SettingsDialog(tk.Toplevel):
         current_df = get_all_sku_classifications()
         current_skus = set(current_df['SKU'].str.casefold()) if not current_df.empty else set()
 
+        # Get all active SKUs with brands from database for auto-matching
+        self.app.status_var.set('Завантаження брендів з бази даних...')
+        self.update_idletasks()
+        try:
+            from Data.Controller import get_all_active_skus
+            db_skus_df = get_all_active_skus()
+            # Create mapping: SKU_UA (lowercase) -> BRAND
+            sku_to_brand = {}
+            if not db_skus_df.empty:
+                for _, row in db_skus_df.iterrows():
+                    sku_key = str(row['SKU_UA']).strip().casefold()
+                    brand = str(row['BRAND']).strip()
+                    if sku_key and brand:
+                        sku_to_brand[sku_key] = brand
+        except Exception as e:
+            print(f'Warning: Could not load SKUs from database: {e}')
+            sku_to_brand = {}
+
         # Show dialog with found SKUs
         dialog = tk.Toplevel(self)
         dialog.title('Продукти з файлу договорів')
-        dialog.geometry('600x500')
+        dialog.geometry('700x550')
         dialog.configure(bg=BG_COLOR)
         dialog.transient(self)
         dialog.grab_set()
@@ -1503,7 +1521,13 @@ class SettingsDialog(tk.Toplevel):
                                  highlightcolor=BORDER_FOCUS, highlightbackground=BORDER)
         filter_entry.pack(side='left', padx=(8, 0), fill='x', expand=True)
 
-        # List with checkboxes
+        # Legend
+        legend_frame = tk.Frame(dialog, bg=BG_COLOR)
+        legend_frame.pack(fill='x', padx=PAD_X, pady=(0, PAD_Y))
+        tk.Label(legend_frame, text='🟢 = знайдено в БД  |  🔴 = не знайдено (вкажіть бренд вручну)',
+                 font=FONT_SMALL, bg=BG_COLOR, fg=TEXT_MUTED).pack(anchor='w')
+
+        # List with checkboxes and brand entry
         frame = tk.Frame(dialog, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
         frame.pack(fill='both', expand=True, padx=PAD_X, pady=(0, PAD_X))
 
@@ -1514,8 +1538,55 @@ class SettingsDialog(tk.Toplevel):
         scrollable_frame = tk.Frame(canvas, bg=SURFACE)
         canvas.create_window((0, 0), window=scrollable_frame, anchor='nw')
 
-        checkboxes = {}
+        # Store data for each SKU: {sku: {'var': BooleanVar, 'category': str, 'brand_var': StringVar, 'frame': widget, 'matched': bool}}
+        sku_data = {}
         row_frames = []
+
+        def create_sku_row(parent, sku, category, is_unknown, matched_brand):
+            """Create a row with checkbox, SKU name, category badge, and brand entry."""
+            row_frame = tk.Frame(parent, bg=SURFACE)
+            row_frame.pack(fill='x', padx=8, pady=2)
+
+            var = tk.BooleanVar(value=is_unknown)
+            cb = tk.Checkbutton(row_frame, variable=var, bg=SURFACE, activebackground=SURFACE)
+            cb.pack(side='left', padx=(0, 8))
+
+            # Status indicator
+            if matched_brand:
+                status_lbl = tk.Label(row_frame, text='🟢', font=FONT_BODY, bg=SURFACE)
+                status_lbl.pack(side='left', padx=(0, 4))
+            else:
+                status_lbl = tk.Label(row_frame, text='🔴', font=FONT_BODY, bg=SURFACE)
+                status_lbl.pack(side='left', padx=(0, 4))
+
+            # SKU name
+            sku_lbl = tk.Label(row_frame, text=sku, font=FONT_BODY, bg=SURFACE, fg=TEXT_MAIN, anchor='w', width=35)
+            sku_lbl.pack(side='left', fill='x', expand=True)
+
+            # Category badge
+            cat_color = '#1a56a0' if category == 'ЛІК' else '#e67e22'
+            cat_lbl = tk.Label(row_frame, text=f'[{category}]', font=FONT_SMALL, bg=SURFACE, fg=cat_color)
+            cat_lbl.pack(side='left', padx=8)
+
+            # Brand entry (pre-filled if matched, editable)
+            brand_var = tk.StringVar(value=matched_brand if matched_brand else '')
+            brand_entry = tk.Entry(row_frame, textvariable=brand_var, font=FONT_BODY, width=20,
+                                    relief='solid', bd=1, highlightthickness=1,
+                                    highlightcolor=BORDER_FOCUS, highlightbackground=BORDER)
+            brand_entry.pack(side='left', padx=8)
+
+            # If matched, make it readonly-ish (gray background) but still editable
+            if matched_brand:
+                brand_entry.configure(bg='#f0f0f0')
+
+            return {
+                'var': var,
+                'category': category,
+                'brand_var': brand_var,
+                'frame': row_frame,
+                'matched': bool(matched_brand),
+                'sku': sku
+            }
 
         # Add ЛІК SKUs
         if lik_skus:
@@ -1524,14 +1595,10 @@ class SettingsDialog(tk.Toplevel):
             lbl.pack(fill='x', padx=8, pady=(8, 2))
             for sku in lik_skus:
                 is_unknown = sku.casefold() not in current_skus
-                var = tk.BooleanVar(value=is_unknown)
-                display_text = f'{sku}  [ЛІК]'
-                cb = tk.Checkbutton(scrollable_frame, text=display_text, variable=var,
-                                     font=FONT_BODY, bg=SURFACE, fg=TEXT_MAIN,
-                                     activebackground=SURFACE, anchor='w')
-                cb.pack(fill='x', padx=8, pady=2)
-                checkboxes[sku] = {'var': var, 'category': 'ЛІК', 'frame': cb}
-                row_frames.append((sku.casefold(), cb))
+                matched_brand = sku_to_brand.get(sku.casefold(), '')
+                data = create_sku_row(scrollable_frame, sku, 'ЛІК', is_unknown, matched_brand)
+                sku_data[sku] = data
+                row_frames.append((sku.casefold(), data['frame']))
 
         # Add ДД SKUs
         if dd_skus:
@@ -1540,27 +1607,22 @@ class SettingsDialog(tk.Toplevel):
             lbl.pack(fill='x', padx=8, pady=(8, 2))
             for sku in dd_skus:
                 is_unknown = sku.casefold() not in current_skus
-                var = tk.BooleanVar(value=is_unknown)
-                display_text = f'{sku}  [ДД]'
-                cb = tk.Checkbutton(scrollable_frame, text=display_text, variable=var,
-                                     font=FONT_BODY, bg=SURFACE, fg=TEXT_MAIN,
-                                     activebackground=SURFACE, anchor='w')
-                cb.pack(fill='x', padx=8, pady=2)
-                checkboxes[sku] = {'var': var, 'category': 'ДД', 'frame': cb}
-                row_frames.append((sku.casefold(), cb))
+                matched_brand = sku_to_brand.get(sku.casefold(), '')
+                data = create_sku_row(scrollable_frame, sku, 'ДД', is_unknown, matched_brand)
+                sku_data[sku] = data
+                row_frames.append((sku.casefold(), data['frame']))
 
         def apply_filter(*args):
             search = filter_var.get().strip().casefold()
-            for sku_lower, cb in row_frames:
+            for sku_lower, row_frame in row_frames:
                 if search in sku_lower:
-                    cb.pack(fill='x', padx=8, pady=2)
+                    row_frame.pack(fill='x', padx=8, pady=2)
                 else:
-                    cb.pack_forget()
+                    row_frame.pack_forget()
             # Also handle section headers
             for widget in scrollable_frame.winfo_children():
                 if isinstance(widget, tk.Label) and widget.cget('text').startswith('==='):
-                    # Check if any checkbox in this section is visible
-                    pass  # Keep headers visible for now
+                    pass  # Keep headers visible
             scrollable_frame.update_idletasks()
             canvas.config(scrollregion=canvas.bbox('all'))
 
@@ -1573,9 +1635,16 @@ class SettingsDialog(tk.Toplevel):
 
         def add_selected():
             added = 0
-            for sku, data in checkboxes.items():
+            for sku, data in sku_data.items():
                 if data['var'].get():
-                    set_sku_classification(sku, data['category'], '')  # brand unknown from this file
+                    brand = data['brand_var'].get().strip()
+                    if not brand and not data['matched']:
+                        # Warn if no brand entered for unmatched
+                        if not messagebox.askyesno('Бренд не вказано',
+                            f'Для продукту "{sku}" не знайдено бренд в БД і не вказано вручну.\nПродовжити без бренду?',
+                            parent=dialog):
+                            return
+                    set_sku_classification(sku, data['category'], brand)
                     added += 1
             self._refresh_sku_table()
             dialog.destroy()
