@@ -1011,14 +1011,23 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
         work_df = mhl_df.copy()
 
         is_lic_category = template_brands == LIK_BRANDS_TEMPLATE
+        category_name = 'ЛІК' if is_lic_category else 'ДД'
         allowed_brands = get_mhl_lik_brands() if is_lic_category else get_mhl_dd_brands()
         brand_col = 'BRAND' if 'BRAND' in work_df.columns else 'brand'
+        sku_col = 'SKU_UA' if 'SKU_UA' in work_df.columns else 'Назва товару'
 
         # Case-insensitive matching with whitespace handling
         # Normalize both MHL brands and allowed brands to lowercase for comparison
         brand_values = work_df[brand_col].fillna('').astype(str).str.strip()
         allowed_brands_lower = {b.lower() for b in allowed_brands}
         work_df = work_df[brand_values.str.lower().isin(allowed_brands_lower)].copy()
+
+        # Also filter by contract SKUs if contract_skus table has data for this category
+        contract_skus = get_contract_skus_for_category(category_name)
+        if contract_skus:
+            # Normalize SKU column for comparison
+            sku_values = work_df[sku_col].fillna('').astype(str).str.strip().str.casefold()
+            work_df = work_df[sku_values.isin(contract_skus)].copy()
 
         if not work_df.empty:
             # Convert numeric columns, keeping track of which were originally NULL
@@ -2523,3 +2532,50 @@ def get_combined_dd_skus(mhl_df=None):
             'price': price
         })
     return result
+
+
+# ============================================================
+# CONTRACT SKUS (from "для договорів" file - database table)
+# ============================================================
+
+def _load_contract_skus_from_db():
+    """Load SKUs from contract_skus database table.
+
+    Returns:
+        dict: {'ЛІК': set of sku_names, 'ДД': set of sku_names}
+    """
+    try:
+        from Data.Controller import load_contract_skus
+        df = load_contract_skus()
+        if df.empty:
+            return {'ЛІК': set(), 'ДД': set()}
+
+        result = {'ЛІК': set(), 'ДД': set()}
+        for _, row in df.iterrows():
+            sku = str(row['sku_ukr']).strip().casefold()
+            cat = str(row['category']).strip().upper()
+            if sku and cat in ('ЛІК', 'ДД'):
+                result[cat].add(sku)
+        return result
+    except Exception as e:
+        print(f"Warning: Could not load contract_skus from DB: {e}")
+        return {'ЛІК': set(), 'ДД': set()}
+
+
+def get_contract_skus_for_category(category):
+    """Get contract SKUs for a specific category (ЛІК or ДД).
+
+    Args:
+        category: 'ЛІК' or 'ДД'
+
+    Returns:
+        set of lowercase SKU names from contract_skus table
+    """
+    contract_skus = _load_contract_skus_from_db()
+    return contract_skus.get(category.upper(), set())
+
+
+def has_contract_skus():
+    """Check if contract_skus table has any data."""
+    contract_skus = _load_contract_skus_from_db()
+    return bool(contract_skus['ЛІК'] or contract_skus['ДД'])
