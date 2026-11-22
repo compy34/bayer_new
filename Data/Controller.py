@@ -293,3 +293,98 @@ def get_all_active_skus(period_start=None, period_end=None):
     finally:
         if connection is not None:
             connection.close()
+
+
+# ============================================================
+# CONTRACT SKUS TABLE (for "для договорів" data)
+# ============================================================
+
+def save_contract_skus(skus_data):
+    """Save SKUs from contract file to database.
+
+    Args:
+        skus_data: List of dicts with keys: sku_ukr, category, brand
+
+    Returns:
+        (success_count, error_message) tuple
+    """
+    if not skus_data:
+        return 0, "No data to save"
+
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+
+        saved = 0
+        for item in skus_data:
+            sku_ukr = str(item.get('sku_ukr', '')).strip()
+            category = str(item.get('category', '')).strip().upper()
+            brand = str(item.get('brand', '')).strip()
+
+            if not sku_ukr or category not in ('ЛІК', 'ДД'):
+                continue
+
+            # Upsert: insert or update
+            cursor.execute("""
+                MERGE contract_skus AS target
+                USING (SELECT ? AS sku_ukr) AS source
+                ON target.sku_ukr = source.sku_ukr
+                WHEN MATCHED THEN
+                    UPDATE SET category = ?, brand = ?, updated_at = GETDATE()
+                WHEN NOT MATCHED THEN
+                    INSERT (sku_ukr, category, brand) VALUES (?, ?, ?);
+            """, sku_ukr, category, brand, sku_ukr, category, brand)
+            saved += 1
+
+        conn.commit()
+        return saved, None
+
+    except pyodbc.Error as e:
+        error_msg = f'Помилка збереження в БД: {e}'
+        print(error_msg)
+        return 0, error_msg
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def load_contract_skus():
+    """Load all SKUs from contract_skus table.
+
+    Returns:
+        DataFrame with columns: sku_ukr, category, brand
+    """
+    conn = None
+    try:
+        conn = _get_connection()
+        query = """
+            SELECT sku_ukr, category, brand
+            FROM contract_skus
+            ORDER BY category, sku_ukr
+        """
+        df = pd.read_sql(query, conn)
+        return df
+    except pyodbc.Error as e:
+        print(f'Помилка завантаження contract_skus: {e}')
+        return pd.DataFrame(columns=['sku_ukr', 'category', 'brand'])
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def delete_contract_sku(sku_ukr):
+    """Delete a SKU from contract_skus table."""
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM contract_skus WHERE sku_ukr = ?", sku_ukr)
+        conn.commit()
+        return cursor.rowcount > 0
+    except pyodbc.Error as e:
+        print(f'Помилка видалення: {e}')
+        return False
+    finally:
+        if conn is not None:
+            conn.close()

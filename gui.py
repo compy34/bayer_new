@@ -46,7 +46,7 @@ from convertor import (
     get_combined_lik_skus,
     get_combined_dd_skus,
 )
-from Data.Controller import get_mhl_data, get_pharmacy_data, load_requisites_file, get_tma_offtake_data, get_all_active_skus, DataLoadError
+from Data.Controller import get_mhl_data, get_pharmacy_data, load_requisites_file, get_tma_offtake_data, get_all_active_skus, DataLoadError, save_contract_skus, load_contract_skus, delete_contract_sku, create_contract_skus_table
 
 
 # ============================================================
@@ -926,6 +926,7 @@ class SettingsDialog(tk.Toplevel):
         ModernButton(toolbar, text='🔄 Оновити', style='secondary', command=self._refresh_sku_table).pack(side='left')
         ModernButton(toolbar, text='📥 Завантажити з MHL', style='outline', command=self._load_skus_from_mhl).pack(side='left', padx=(8, 0))
         ModernButton(toolbar, text='🗄 Завантажити всі з БД', style='outline', command=self._load_all_skus_from_db).pack(side='left', padx=(8, 0))
+        ModernButton(toolbar, text='📂 Завантажити з contract_skus', style='outline', command=self._load_skus_from_contract_db).pack(side='left', padx=(8, 0))
 
         # Bulk category change buttons
         tk.Frame(toolbar, bg=BG_COLOR, width=20).pack(side='left')  # spacer
@@ -1386,6 +1387,115 @@ class SettingsDialog(tk.Toplevel):
         ModernButton(btn_frame, text='Скасувати', style='secondary', command=dialog.destroy).pack(side='right', padx=(8, 0))
         ModernButton(btn_frame, text='Додати вибране', style='success', command=add_selected).pack(side='right')
 
+    def _load_skus_from_contract_db(self):
+        """Load SKUs from contract_skus database table."""
+        self.app.status_var.set('Завантаження з contract_skus...')
+        self.update_idletasks()
+
+        try:
+            create_contract_skus_table()  # Ensure table exists
+            df = load_contract_skus()
+        except Exception as e:
+            messagebox.showerror('Помилка', f'Не вдалося завантажити з БД: {e}', parent=self)
+            self.app.status_var.set('Помилка завантаження')
+            return
+
+        if df.empty:
+            messagebox.showinfo('База даних', 'Таблиця contract_skus порожня.', parent=self)
+            self.app.status_var.set('Дані не знайдені')
+            return
+
+        # Get current classifications
+        current_df = get_all_sku_classifications()
+        current_skus = set(current_df['SKU'].str.casefold()) if not current_df.empty else set()
+
+        # Show dialog with products from contract_skus
+        dialog = tk.Toplevel(self)
+        dialog.title('Продукти з contract_skus (БД)')
+        dialog.geometry('700x550')
+        dialog.configure(bg=BG_COLOR)
+        dialog.transient(self)
+        dialog.grab_set()
+
+        dialog.update_idletasks()
+        x = self.winfo_rootx() + (self.winfo_width() - dialog.winfo_width()) // 2
+        y = self.winfo_rooty() + (self.winfo_height() - dialog.winfo_height()) // 2
+        dialog.geometry(f'+{x}+{y}')
+
+        tk.Label(dialog, text=f'Знайдено {len(df)} продуктів у contract_skus:',
+                 font=FONT_SUBTITLE, bg=BG_COLOR, fg=TEXT_MAIN).pack(anchor='w', padx=PAD_X, pady=PAD_Y)
+
+        # Filter/search frame
+        filter_frame = tk.Frame(dialog, bg=BG_COLOR)
+        filter_frame.pack(fill='x', padx=PAD_X, pady=(0, PAD_Y))
+        tk.Label(filter_frame, text='Фільтр:', font=FONT_BODY, bg=BG_COLOR, fg=TEXT_MAIN).pack(side='left')
+        filter_var = tk.StringVar()
+        filter_entry = tk.Entry(filter_frame, textvariable=filter_var, font=FONT_BODY, width=40,
+                                 relief='solid', bd=1, highlightthickness=1,
+                                 highlightcolor=BORDER_FOCUS, highlightbackground=BORDER)
+        filter_entry.pack(side='left', padx=(8, 0), fill='x', expand=True)
+
+        # List with checkboxes
+        frame = tk.Frame(dialog, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
+        frame.pack(fill='both', expand=True, padx=PAD_X, pady=(0, PAD_X))
+
+        canvas = tk.Canvas(frame, bg=SURFACE, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(frame, orient='vertical', command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        scrollable_frame = tk.Frame(canvas, bg=SURFACE)
+        canvas.create_window((0, 0), window=scrollable_frame, anchor='nw')
+
+        checkboxes = {}
+        row_frames = []
+
+        for _, row in df.iterrows():
+            sku = str(row['sku_ukr']).strip()
+            category = str(row['category']).strip().upper()
+            brand = str(row['brand']).strip() if pd.notna(row['brand']) else ''
+            display_text = f'{sku}  [{brand}]  [{category}]'
+            is_unknown = sku.casefold() not in current_skus
+            var = tk.BooleanVar(value=is_unknown)
+            cb = tk.Checkbutton(scrollable_frame, text=display_text, variable=var,
+                                 font=FONT_BODY, bg=SURFACE, fg=TEXT_MAIN,
+                                 activebackground=SURFACE, anchor='w')
+            cb.pack(fill='x', padx=8, pady=2)
+            checkboxes[sku] = {'var': var, 'category': category, 'brand': brand, 'frame': cb}
+            row_frames.append((sku.casefold(), cb))
+
+        def apply_filter(*args):
+            search = filter_var.get().strip().casefold()
+            for sku_lower, cb in row_frames:
+                if search in sku_lower:
+                    cb.pack(fill='x', padx=8, pady=2)
+                else:
+                    cb.pack_forget()
+            scrollable_frame.update_idletasks()
+            canvas.config(scrollregion=canvas.bbox('all'))
+
+        filter_var.trace_add('write', apply_filter)
+
+        scrollable_frame.update_idletasks()
+        canvas.config(scrollregion=canvas.bbox('all'))
+        canvas.pack(side='left', fill='both', expand=True, padx=8, pady=8)
+        scrollbar.pack(side='right', fill='y', pady=8)
+
+        def add_selected():
+            added = 0
+            for sku, data in checkboxes.items():
+                if data['var'].get():
+                    set_sku_classification(sku, data['category'], data['brand'])
+                    added += 1
+            self._refresh_sku_table()
+            dialog.destroy()
+            self.app.status_var.set(f'Додано/оновлено {added} продукт(ів) з contract_skus')
+            messagebox.showinfo('Готово', f'Додано/оновлено {added} продукт(ів) з contract_skus.', parent=self)
+
+        btn_frame = tk.Frame(dialog, bg=BG_COLOR)
+        btn_frame.pack(fill='x', padx=PAD_X, pady=PAD_Y)
+        ModernButton(btn_frame, text='Скасувати', style='secondary', command=dialog.destroy).pack(side='right', padx=(8, 0))
+        ModernButton(btn_frame, text='Додати вибране', style='success', command=add_selected).pack(side='right')
+
     def _select_contract_file(self):
         """Select the 'для договорів' Excel file."""
         filename = filedialog.askopenfilename(
@@ -1637,6 +1747,7 @@ class SettingsDialog(tk.Toplevel):
 
         def add_selected():
             added = 0
+            db_items = []
             for sku, data in sku_data.items():
                 if data['var'].get():
                     brand = data['brand_var'].get().strip()
@@ -1647,7 +1758,21 @@ class SettingsDialog(tk.Toplevel):
                             parent=dialog):
                             return
                     set_sku_classification(sku, data['category'], brand)
+                    db_items.append({'sku_ukr': sku, 'category': data['category'], 'brand': brand})
                     added += 1
+
+            # Also save to database contract_skus table
+            if db_items:
+                try:
+                    create_contract_skus_table()  # Ensure table exists
+                    saved, err = save_contract_skus(db_items)
+                    if err:
+                        print(f'Warning: DB save failed: {err}')
+                    else:
+                        self.app.status_var.set(f'Збережено в БД: {saved} продукт(ів)')
+                except Exception as e:
+                    print(f'Warning: DB save error: {e}')
+
             self._refresh_sku_table()
             dialog.destroy()
             self.app.status_var.set(f'Додано/оновлено {added} продукт(ів) з файлу договорів')
