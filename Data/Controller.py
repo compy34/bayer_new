@@ -189,3 +189,45 @@ def load_requisites_file(filename):
     # Очищуємо заголовки колонок від зайвих пробілів
     df_req.columns = df_req.columns.astype(str).str.strip()
     return df_req.fillna('')
+
+
+def get_all_active_skus():
+    """Get all unique SKUs with their brands from the database.
+
+    Returns:
+        DataFrame with columns: SKU_UA, BRAND
+        Contains all unique product names (SKU_UA) from key_SKU table
+        with their corresponding brand from calc_KA.
+    """
+    connection = None
+    try:
+        connection = _get_connection()
+
+        # Get all unique SKU-Brand pairs from the database
+        # key_SKU has SKU_UA and DRUG_ID, calc_KA has DRUG_ID and BRAND
+        query = """
+            SELECT DISTINCT
+                sku.[SKU_UA],
+                ka.[BRAND]
+            FROM [dbo].[key_SKU] AS sku
+            INNER JOIN [dbo].[calc_KA] AS ka
+                ON ka.[DRUG_ID] = sku.[DRUG_ID]
+            WHERE sku.[SKU_UA] IS NOT NULL
+              AND sku.[SKU_UA] <> ''
+              AND ka.[BRAND] IS NOT NULL
+              AND ka.[BRAND] <> ''
+        """
+
+        df = pd.read_sql(query, connection)
+        # Clean up
+        df['SKU_UA'] = df['SKU_UA'].astype(str).str.strip()
+        df['BRAND'] = df['BRAND'].astype(str).str.strip()
+        df = df[(df['SKU_UA'] != '') & (df['BRAND'] != '')]
+        return df.drop_duplicates().sort_values(['BRAND', 'SKU_UA']).reset_index(drop=True)
+
+    except pyodbc.Error as e:
+        raise DataLoadError(f'Помилка завантаження списку продуктів: {e}') from e
+
+    finally:
+        if connection is not None:
+            connection.close()

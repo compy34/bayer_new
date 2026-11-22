@@ -46,7 +46,7 @@ from convertor import (
     get_combined_lik_skus,
     get_combined_dd_skus,
 )
-from Data.Controller import get_mhl_data, get_pharmacy_data, load_requisites_file, get_tma_offtake_data, DataLoadError
+from Data.Controller import get_mhl_data, get_pharmacy_data, load_requisites_file, get_tma_offtake_data, get_all_active_skus, DataLoadError
 
 
 # ============================================================
@@ -925,6 +925,7 @@ class SettingsDialog(tk.Toplevel):
         ModernButton(toolbar, text='➕ Додати продукт', style='primary', command=self._add_sku).pack(side='left', padx=(0, 8))
         ModernButton(toolbar, text='🔄 Оновити', style='secondary', command=self._refresh_sku_table).pack(side='left')
         ModernButton(toolbar, text='📥 Завантажити з MHL', style='outline', command=self._load_skus_from_mhl).pack(side='left', padx=(8, 0))
+        ModernButton(toolbar, text='🗄 Завантажити всі з БД', style='outline', command=self._load_all_skus_from_db).pack(side='left', padx=(8, 0))
 
         # Table
         table_frame = tk.Frame(parent, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
@@ -1180,6 +1181,143 @@ class SettingsDialog(tk.Toplevel):
             dialog.destroy()
             self.app.status_var.set(f'Додано {added} продукт(ів) до кваліфікації')
             messagebox.showinfo('Готово', f'Додано {added} продукт(ів) до кваліфікації.', parent=self)
+
+        btn_frame = tk.Frame(dialog, bg=BG_COLOR)
+        btn_frame.pack(fill='x', padx=PAD_X, pady=PAD_Y)
+        ModernButton(btn_frame, text='Скасувати', style='secondary', command=dialog.destroy).pack(side='right', padx=(8, 0))
+        ModernButton(btn_frame, text='Додати вибране', style='success', command=add_selected).pack(side='right')
+
+    def _load_all_skus_from_db(self):
+        """Load all unique SKUs with brands from the database for classification."""
+        # Show loading indicator
+        self.app.status_var.set('Завантаження продуктів з бази даних...')
+        self.update_idletasks()
+
+        try:
+            df_skus = get_all_active_skus()
+        except DataLoadError as e:
+            messagebox.showerror('Помилка', f'Не вдалося завантажити продукти з БД: {e}', parent=self)
+            self.app.status_var.set('Помилка завантаження')
+            return
+        except Exception as e:
+            messagebox.showerror('Помилка', f'Неочікувана помилка: {e}', parent=self)
+            self.app.status_var.set('Помилка завантаження')
+            return
+
+        if df_skus.empty:
+            messagebox.showinfo('База даних', 'Продукти не знайдені.', parent=self)
+            self.app.status_var.set('Продукти не знайдені')
+            return
+
+        # Get current classifications
+        current_df = get_all_sku_classifications()
+        current_skus = set(current_df['SKU'].str.casefold()) if not current_df.empty else set()
+
+        # Get config-based SKUs
+        lik_skus = set()
+        dd_skus = set()
+        if self.app.df_mhl is not None:
+            lik_sku_list = get_combined_lik_skus(self.app.df_mhl)
+            dd_sku_list = get_combined_dd_skus(self.app.df_mhl)
+            lik_skus = {s['sku'].casefold() for s in lik_sku_list}
+            dd_skus = {s['sku'].casefold() for s in dd_sku_list}
+        all_known_skus = lik_skus | dd_skus
+
+        # Find SKUs not yet classified
+        df_skus['SKU_lower'] = df_skus['SKU_UA'].str.casefold()
+        unknown = df_skus[~df_skus['SKU_lower'].isin(current_skus | all_known_skus)]
+
+        # Show dialog with ALL products, but pre-check unknown ones
+        dialog = tk.Toplevel(self)
+        dialog.title('Всі продукти з бази даних')
+        dialog.geometry('700x600')
+        dialog.configure(bg=BG_COLOR)
+        dialog.transient(self)
+        dialog.grab_set()
+
+        dialog.update_idletasks()
+        x = self.winfo_rootx() + (self.winfo_width() - dialog.winfo_width()) // 2
+        y = self.winfo_rooty() + (self.winfo_height() - dialog.winfo_height()) // 2
+        dialog.geometry(f'+{x}+{y}')
+
+        tk.Label(dialog, text=f'Знайдено {len(df_skus)} продуктів у базі даних ({len(unknown)} нових):',
+                 font=FONT_SUBTITLE, bg=BG_COLOR, fg=TEXT_MAIN).pack(anchor='w', padx=PAD_X, pady=PAD_Y)
+
+        # Filter/search frame
+        filter_frame = tk.Frame(dialog, bg=BG_COLOR)
+        filter_frame.pack(fill='x', padx=PAD_X, pady=(0, PAD_Y))
+        tk.Label(filter_frame, text='Фільтр:', font=FONT_BODY, bg=BG_COLOR, fg=TEXT_MAIN).pack(side='left')
+        filter_var = tk.StringVar()
+        filter_entry = tk.Entry(filter_frame, textvariable=filter_var, font=FONT_BODY, width=40,
+                                 relief='solid', bd=1, highlightthickness=1,
+                                 highlightcolor=BORDER_FOCUS, highlightbackground=BORDER)
+        filter_entry.pack(side='left', padx=(8, 0), fill='x', expand=True)
+
+        # List with checkboxes - show SKU + Brand
+        frame = tk.Frame(dialog, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
+        frame.pack(fill='both', expand=True, padx=PAD_X, pady=(0, PAD_X))
+
+        canvas = tk.Canvas(frame, bg=SURFACE, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(frame, orient='vertical', command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        scrollable_frame = tk.Frame(canvas, bg=SURFACE)
+        canvas.create_window((0, 0), window=scrollable_frame, anchor='nw')
+
+        checkboxes = {}
+        row_frames = []  # Store frames for filtering
+
+        for _, row in df_skus.iterrows():
+            sku = row['SKU_UA']
+            brand = row['BRAND']
+            display_text = f'{sku}  [{brand}]'
+            # Pre-check if unknown (not yet classified)
+            is_unknown = sku.casefold() in unknown['SKU_UA'].str.casefold().values
+            var = tk.BooleanVar(value=is_unknown)
+            cb = tk.Checkbutton(scrollable_frame, text=display_text, variable=var,
+                                 font=FONT_BODY, bg=SURFACE, fg=TEXT_MAIN,
+                                 activebackground=SURFACE, anchor='w')
+            cb.pack(fill='x', padx=8, pady=2)
+            checkboxes[sku] = {'var': var, 'brand': brand, 'frame': cb}
+            row_frames.append((sku.casefold(), cb))
+
+        def apply_filter(*args):
+            """Filter the list based on search text."""
+            search = filter_var.get().strip().casefold()
+            for sku_lower, cb in row_frames:
+                if search in sku_lower:
+                    cb.pack(fill='x', padx=8, pady=2)
+                else:
+                    cb.pack_forget()
+            scrollable_frame.update_idletasks()
+            canvas.config(scrollregion=canvas.bbox('all'))
+
+        filter_var.trace_add('write', apply_filter)
+
+        scrollable_frame.update_idletasks()
+        canvas.config(scrollregion=canvas.bbox('all'))
+        canvas.pack(side='left', fill='both', expand=True, padx=8, pady=8)
+        scrollbar.pack(side='right', fill='y', pady=8)
+
+        def add_selected():
+            added = 0
+            for sku, data in checkboxes.items():
+                if data['var'].get():
+                    # Try to guess category from config
+                    cat = None
+                    sku_lower = sku.casefold()
+                    if sku_lower in lik_skus:
+                        cat = 'ЛІК'
+                    elif sku_lower in dd_skus:
+                        cat = 'ДД'
+                    else:
+                        cat = 'ЛІК'  # default
+                    set_sku_classification(sku, cat, data['brand'])
+                    added += 1
+            self._refresh_sku_table()
+            dialog.destroy()
+            self.app.status_var.set(f'Додано/оновлено {added} продукт(ів) до кваліфікації')
+            messagebox.showinfo('Готово', f'Додано/оновлено {added} продукт(ів) до кваліфікації.', parent=self)
 
         btn_frame = tk.Frame(dialog, bg=BG_COLOR)
         btn_frame.pack(fill='x', padx=PAD_X, pady=PAD_Y)
