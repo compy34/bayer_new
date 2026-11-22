@@ -927,6 +927,11 @@ class SettingsDialog(tk.Toplevel):
         ModernButton(toolbar, text='📥 Завантажити з MHL', style='outline', command=self._load_skus_from_mhl).pack(side='left', padx=(8, 0))
         ModernButton(toolbar, text='🗄 Завантажити всі з БД', style='outline', command=self._load_all_skus_from_db).pack(side='left', padx=(8, 0))
 
+        # Bulk category change buttons
+        tk.Frame(toolbar, bg=BG_COLOR, width=20).pack(side='left')  # spacer
+        ModernButton(toolbar, text='🔄 В ЛІК', style='success', command=lambda: self._bulk_change_category('ЛІК')).pack(side='left', padx=(8, 0))
+        ModernButton(toolbar, text='🔄 В ДД', style='warning', command=lambda: self._bulk_change_category('ДД')).pack(side='left', padx=(8, 0))
+
         # Table
         table_frame = tk.Frame(parent, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
         table_frame.pack(fill='both', expand=True)
@@ -1073,6 +1078,45 @@ class SettingsDialog(tk.Toplevel):
                 sku = values[0]
                 remove_sku_classification(sku)
             self._refresh_sku_table()
+
+    def _bulk_change_category(self, new_category):
+        """Change category of selected SKUs to new_category (ЛІК or ДД)."""
+        selected = self.sku_tree.selection()
+        if not selected:
+            messagebox.showinfo('Інформація', 'Виберіть продукти для зміни категорії.', parent=self)
+            return
+
+        # Confirm if changing many items
+        if len(selected) > 10:
+            if not messagebox.askyesno('Підтвердження',
+                    f'Змінити категорію на "{new_category}" для {len(selected)} продуктів?', parent=self):
+                return
+        else:
+            # Show which items will be changed
+            items_info = []
+            for item in selected:
+                values = self.sku_tree.item(item, 'values')
+                items_info.append(f'  • {values[0]} [{values[1]}] — {values[2]} → {new_category}')
+            if not messagebox.askyesno('Підтвердження',
+                    f'Змінити категорію на "{new_category}" для:\n' + '\n'.join(items_info), parent=self):
+                return
+
+        changed = 0
+        for item in selected:
+            values = self.sku_tree.item(item, 'values')
+            sku = values[0]
+            brand = values[1]
+            old_cat = values[2]
+            if old_cat != new_category:
+                set_sku_classification(sku, new_category, brand)
+                changed += 1
+
+        if changed > 0:
+            self._refresh_sku_table()
+            self.app.status_var.set(f'Категорію змінено для {changed} продукт(ів) на {new_category}')
+            messagebox.showinfo('Готово', f'Категорію змінено для {changed} продукт(ів) на {new_category}.', parent=self)
+        else:
+            messagebox.showinfo('Інформація', 'Всі вибрані продукти вже мають цю категорію.', parent=self)
 
     def _load_skus_from_mhl(self):
         """Load unique SKUs from current MHL data and add unknown ones to classification."""
