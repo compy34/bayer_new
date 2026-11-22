@@ -191,7 +191,12 @@ class SettingsDialog(tk.Toplevel):
         notebook.add(tma_settings_frame, text='  ТМА Налаштування  ')
         self._build_tma_settings_tab(tma_settings_frame)
 
-        # --- Tab 6: Brand Qualification ---
+        # --- Tab 6: Load to DB (Import "для договорів" to database) ---
+        db_import_frame = tk.Frame(notebook, bg=BG_COLOR)
+        notebook.add(db_import_frame, text='  📂 Завантаження в БД  ')
+        self._build_db_import_tab(db_import_frame)
+
+        # --- Tab 7: Brand/SKU Qualification ---
         brand_frame = tk.Frame(notebook, bg=BG_COLOR)
         notebook.add(brand_frame, text='  Кваліфікація брендів  ')
         self._build_brand_tab(brand_frame)
@@ -704,6 +709,239 @@ class SettingsDialog(tk.Toplevel):
         hsb2.grid(row=1, column=0, sticky='ew')
 
         self._refresh_la_price_preview()
+
+    def _build_db_import_tab(self, parent):
+        """Tab for importing 'для договорів' file directly into database (contract_skus table)."""
+        tk.Label(
+            parent,
+            text='Імпорт файлу "для договорів" в базу даних (таблиця contract_skus).\n'
+                 'Це окрема вкладка для швидкого завантаження кваліфікації в БД.\n'
+                 'MHL-звіти будуть брати дані ТІЛЬКИ з цієї таблиці.',
+            font=FONT_SMALL, bg=BG_COLOR, fg=TEXT_MUTED, wraplength=600, justify='left'
+        ).pack(anchor='w', pady=(0, PAD_Y))
+
+        # File selector
+        file_frame = tk.Frame(parent, bg=BG_COLOR)
+        file_frame.pack(fill='x', pady=(0, PAD_Y))
+        file_frame.columnconfigure(1, weight=1)
+
+        tk.Label(file_frame, text='Файл "для договорів":', font=FONT_BODY, bg=BG_COLOR, fg=TEXT_MAIN).grid(row=0, column=0, sticky='w', padx=(0, 10))
+        self.db_import_file_var = tk.StringVar(value='')
+        db_import_file_entry = tk.Entry(file_frame, textvariable=self.db_import_file_var,
+                                         font=FONT_BODY, relief='solid', bd=1,
+                                         highlightthickness=1, highlightcolor=BORDER_FOCUS, highlightbackground=BORDER)
+        db_import_file_entry.grid(row=0, column=1, sticky='ew', padx=(0, 10))
+        ModernButton(file_frame, text='Обрати...', style='outline',
+                    command=self._select_db_import_file).grid(row=0, column=2, sticky='e', padx=(0, 8))
+
+        # Buttons
+        btn_frame = tk.Frame(parent, bg=BG_COLOR)
+        btn_frame.pack(fill='x', pady=(0, PAD_Y))
+        ModernButton(btn_frame, text='📥 Завантажити в БД', style='primary',
+                    command=self._load_file_to_db).pack(side='left', padx=(0, 8))
+        ModernButton(btn_frame, text='🔄 Оновити перегляд БД', style='secondary',
+                    command=self._refresh_db_import_preview).pack(side='left', padx=(0, 8))
+        ModernButton(btn_frame, text='🗑 Очистити таблицю', style='danger',
+                    command=self._clear_contract_skus_table).pack(side='left', padx=(0, 8))
+
+        # Status/Info
+        info_frame = tk.Frame(parent, bg=BG_COLOR)
+        info_frame.pack(fill='x', pady=(0, PAD_Y))
+        self.db_import_status_var = tk.StringVar(value='Таблиця contract_skus: не перевіряно')
+        tk.Label(info_frame, textvariable=self.db_import_status_var, font=FONT_SMALL, bg=BG_COLOR, fg=TEXT_MUTED).pack(anchor='w')
+
+        # Preview of DB table
+        tk.Label(parent, text='Вміст таблиці contract_skus:', font=FONT_SUBTITLE, bg=BG_COLOR, fg=TEXT_MAIN).pack(anchor='w', pady=(PAD_Y, 4))
+
+        preview_frame = tk.Frame(parent, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
+        preview_frame.pack(fill='both', expand=True)
+
+        columns = ('SKU', 'BRAND', 'CATEGORY', 'CREATED', 'UPDATED')
+        self.db_import_tree = ttk.Treeview(preview_frame, columns=columns, show='headings', selectmode='extended')
+
+        col_config = {
+            'SKU': ('Продукт (SKU)', 300),
+            'BRAND': ('Бренд', 180),
+            'CATEGORY': ('Категорія', 100),
+            'CREATED': ('Створено', 150),
+            'UPDATED': ('Оновлено', 150),
+        }
+        for col, (title, width) in col_config.items():
+            self.db_import_tree.heading(col, text=title)
+            self.db_import_tree.column(col, width=width, anchor='w' if col != 'CATEGORY' else 'center')
+
+        vsb = ttk.Scrollbar(preview_frame, orient='vertical', command=self.db_import_tree.yview)
+        hsb = ttk.Scrollbar(preview_frame, orient='horizontal', command=self.db_import_tree.xview)
+        self.db_import_tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+
+        self.db_import_tree.grid(row=0, column=0, sticky='nsew')
+        vsb.grid(row=0, column=1, sticky='ns')
+        hsb.grid(row=1, column=0, sticky='ew')
+        preview_frame.grid_rowconfigure(0, weight=1)
+        preview_frame.grid_columnconfigure(0, weight=1)
+
+        # Initial load
+        self._refresh_db_import_preview()
+
+    def _select_db_import_file(self):
+        """Select the 'для договорів' Excel file for DB import."""
+        filename = filedialog.askopenfilename(
+            title='Виберіть файл "для договорів"',
+            initialdir=str(Path.cwd()),
+            filetypes=[('Excel', '*.xlsx *.xls'), ('Усі файли', '*.*')]
+        )
+        if filename:
+            self.db_import_file_var.set(filename)
+
+    def _load_file_to_db(self):
+        """Parse the file and save to contract_skus database table."""
+        filepath = self.db_import_file_var.get().strip()
+        if not filepath:
+            messagebox.showwarning('Попередження', 'Спочатку оберіть файл.', parent=self)
+            return
+
+        self.app.status_var.set('Завантаження файлу в БД...')
+        self.update_idletasks()
+
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
+            # Find sheet "для договорів" or first sheet
+            sheet_name = None
+            for name in wb.sheetnames:
+                if 'для договор' in name.lower() or 'договор' in name.lower():
+                    sheet_name = name
+                    break
+            if sheet_name is None:
+                sheet_name = wb.sheetnames[0]
+            ws = wb[sheet_name]
+
+            # Read all rows to find the two tables
+            rows = list(ws.iter_rows(values_only=True))
+
+            # Find header row with SKU_UKR, SKU_UKR, Q3'26, %
+            header_row_idx = None
+            sku_ukr_col = None
+            for i, row in enumerate(rows):
+                if not row:
+                    continue
+                row_str = [str(c).strip() if c else '' for c in row]
+                if any('SKU_UKR' in c.upper() or 'SKU_УКР' in c.upper() for c in row_str):
+                    header_row_idx = i
+                    for j, c in enumerate(row_str):
+                        if 'SKU_UKR' in c.upper() or 'SKU_УКР' in c.upper():
+                            sku_ukr_col = j
+                            break
+                    break
+
+            if header_row_idx is None or sku_ukr_col is None:
+                messagebox.showerror('Помилка', 'Не знайдено колонку SKU_UKR у файлі.', parent=self)
+                self.app.status_var.set('Помилка: колонка SKU_UKR не знайдена')
+                wb.close()
+                return
+
+            # Parse both tables: first ЛІК, then after empty row - ДД
+            lik_skus = []
+            dd_skus = []
+            current_category = 'ЛІК'
+
+            for i in range(header_row_idx + 1, len(rows)):
+                row = rows[i]
+                if not row or all(c is None or str(c).strip() == '' for c in row):
+                    current_category = 'ДД'
+                    continue
+
+                sku_ukr = row[sku_ukr_col] if sku_ukr_col < len(row) else None
+                if sku_ukr and str(sku_ukr).strip():
+                    sku_clean = str(sku_ukr).strip()
+                    if current_category == 'ЛІК':
+                        lik_skus.append(sku_clean)
+                    else:
+                        dd_skus.append(sku_clean)
+
+            wb.close()
+
+        except Exception as e:
+            messagebox.showerror('Помилка', f'Не вдалося прочитати файл: {e}', parent=self)
+            self.app.status_var.set('Помилка читання файлу')
+            return
+
+        if not lik_skus and not dd_skus:
+            messagebox.showinfo('Файл договорів', 'Продукти не знайдені у файлі.', parent=self)
+            self.app.status_var.set('Продукти не знайдені')
+            return
+
+        # Prepare data for DB
+        db_items = []
+        for sku in lik_skus:
+            db_items.append({'sku_ukr': sku, 'category': 'ЛІК', 'brand': ''})
+        for sku in dd_skus:
+            db_items.append({'sku_ukr': sku, 'category': 'ДД', 'brand': ''})
+
+        # Save to DB
+        try:
+            from Data.Controller import create_contract_skus_table, save_contract_skus
+            create_contract_skus_table()
+            saved, err = save_contract_skus(db_items)
+            if err:
+                messagebox.showerror('Помилка БД', f'Не вдалося зберегти в БД: {err}', parent=self)
+                self.app.status_var.set('Помилка збереження в БД')
+                return
+        except Exception as e:
+            messagebox.showerror('Помилка БД', f'Помилка при роботі з БД: {e}', parent=self)
+            self.app.status_var.set('Помилка БД')
+            return
+
+        self._refresh_db_import_preview()
+        self.app.status_var.set(f'Успішно завантажено в БД: {saved} продукт(ів) (ЛІК: {len(lik_skus)}, ДД: {len(dd_skus)})')
+        messagebox.showinfo('Готово', f'Завантажено в БД: {saved} продукт(ів)\nЛІК: {len(lik_skus)}\nДД: {len(dd_skus)}', parent=self)
+
+    def _refresh_db_import_preview(self):
+        """Refresh the preview of contract_skus table."""
+        # Clear tree
+        for item in self.db_import_tree.get_children():
+            self.db_import_tree.delete(item)
+
+        try:
+            from Data.Controller import load_contract_skus, create_contract_skus_table
+            create_contract_skus_table()  # Ensure table exists
+            df = load_contract_skus()
+        except Exception as e:
+            self.db_import_status_var.set(f'Помилка завантаження: {e}')
+            return
+
+        if df.empty:
+            self.db_import_status_var.set('Таблиця contract_skus: порожня')
+            return
+
+        lik_count = len(df[df['category'] == 'ЛІК'])
+        dd_count = len(df[df['category'] == 'ДД'])
+        self.db_import_status_var.set(f'Таблиця contract_skus: {len(df)} продукт(ів) (ЛІК: {lik_count}, ДД: {dd_count})')
+
+        for _, row in df.iterrows():
+            sku = str(row['sku_ukr']).strip()
+            category = str(row['category']).strip().upper()
+            brand = str(row['brand']).strip() if pd.notna(row['brand']) else ''
+            created = str(row['created_at']) if 'created_at' in row and pd.notna(row['created_at']) else ''
+            updated = str(row['updated_at']) if 'updated_at' in row and pd.notna(row['updated_at']) else ''
+            self.db_import_tree.insert('', 'end', values=(sku, brand, category, created, updated))
+
+    def _clear_contract_skus_table(self):
+        """Clear the contract_skus table."""
+        if not messagebox.askyesno('Підтвердження', 'Видалити ВСІ дані з таблиці contract_skus?\nЦю дію неможливо скасувати.', parent=self):
+            return
+        try:
+            from Data.Controller import _get_connection
+            conn = _get_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM contract_skus")
+            conn.commit()
+            conn.close()
+            self._refresh_db_import_preview()
+            self.app.status_var.set('Таблиця contract_skus очищено')
+            messagebox.showinfo('Готово', 'Таблиця contract_skus очищено.', parent=self)
+        except Exception as e:
+            messagebox.showerror('Помилка', f'Не вдалося очистити таблицю: {e}', parent=self)
 
     def _select_mhl_action_file(self):
         filename = filedialog.askopenfilename(
