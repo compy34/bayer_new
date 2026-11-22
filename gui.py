@@ -889,19 +889,33 @@ class SettingsDialog(tk.Toplevel):
             print(f'Warning: Could not load brands from DB: {e}')
             sku_to_brand = {}
 
-        # Prepare data for DB with brands
-        db_items = []
-        matched_count = 0
+        # Prepare data for DB with brands - separate matched and unmatched
+        matched_items = []  # Items with brand found in DB
+        unmatched_items = []  # Items needing manual brand entry
+
         for sku in lik_skus:
             brand = sku_to_brand.get(sku.casefold(), '')
             if brand:
-                matched_count += 1
-            db_items.append({'sku_ukr': sku, 'category': 'ЛІК', 'brand': brand})
+                matched_items.append({'sku_ukr': sku, 'category': 'ЛІК', 'brand': brand})
+            else:
+                unmatched_items.append({'sku_ukr': sku, 'category': 'ЛІК', 'brand': ''})
         for sku in dd_skus:
             brand = sku_to_brand.get(sku.casefold(), '')
             if brand:
-                matched_count += 1
-            db_items.append({'sku_ukr': sku, 'category': 'ДД', 'brand': brand})
+                matched_items.append({'sku_ukr': sku, 'category': 'ДД', 'brand': brand})
+            else:
+                unmatched_items.append({'sku_ukr': sku, 'category': 'ДД', 'brand': ''})
+
+        # If there are unmatched SKUs, show dialog to enter brands manually
+        if unmatched_items:
+            result = self._show_brand_entry_dialog(unmatched_items)
+            if result is None:  # User cancelled
+                self.app.status_var.set('Імпорт скасовано користувачем')
+                return
+            # Merge matched + manually entered
+            db_items = matched_items + result
+        else:
+            db_items = matched_items
 
         # Save to DB
         try:
@@ -919,7 +933,7 @@ class SettingsDialog(tk.Toplevel):
 
         self._refresh_db_import_preview()
         self.app.status_var.set(f'Успішно завантажено в БД: {saved} продукт(ів) (ЛІК: {len(lik_skus)}, ДД: {len(dd_skus)})')
-        messagebox.showinfo('Готово', f'Завантажено в БД: {saved} продукт(ів)\nЛІК: {len(lik_skus)}\nДД: {len(dd_skus)}', parent=self)
+        messagebox.showinfo('Готово', f'Завантажено в БД: {saved} продукт(ів)\nЛІК: {len(lik_skus)} (авто: {len([i for i in matched_items if i["category"]=="ЛІК"])}, руч.: {len([i for i in db_items if i["category"]=="ЛІК" and i not in matched_items])})\nДД: {len(dd_skus)} (авто: {len([i for i in matched_items if i["category"]=="ДД"])}, руч.: {len([i for i in db_items if i["category"]=="ДД" and i not in matched_items])})', parent=self)
 
     def _refresh_db_import_preview(self):
         """Refresh the preview of contract_skus table."""
@@ -967,6 +981,157 @@ class SettingsDialog(tk.Toplevel):
             messagebox.showinfo('Готово', 'Таблиця contract_skus очищено.', parent=self)
         except Exception as e:
             messagebox.showerror('Помилка', f'Не вдалося очистити таблицю: {e}', parent=self)
+
+    def _show_brand_entry_dialog(self, unmatched_items):
+        """Show dialog to manually enter brands for unmatched SKUs.
+
+        Args:
+            unmatched_items: List of dicts with sku_ukr, category, brand=''
+
+        Returns:
+            List of dicts with sku_ukr, category, brand (filled by user), or None if cancelled
+        """
+        dialog = tk.Toplevel(self)
+        dialog.title('Вкажіть бренди для не знайдених продуктів')
+        dialog.geometry('700x500')
+        dialog.configure(bg=BG_COLOR)
+        dialog.transient(self)
+        dialog.grab_set()
+
+        dialog.update_idletasks()
+        x = self.winfo_rootx() + (self.winfo_width() - dialog.winfo_width()) // 2
+        y = self.winfo_rooty() + (self.winfo_height() - dialog.winfo_height()) // 2
+        dialog.geometry(f'+{x}+{y}')
+
+        tk.Label(dialog, text=f'Знайдено {len(unmatched_items)} продукт(ів) без бренду в БД.\nВкажіть бренд для кожного (або залиште порожнім для пропуску):',
+                 font=FONT_SUBTITLE, bg=BG_COLOR, fg=TEXT_MAIN).pack(anchor='w', padx=PAD_X, pady=PAD_Y)
+
+        # Filter/search frame
+        filter_frame = tk.Frame(dialog, bg=BG_COLOR)
+        filter_frame.pack(fill='x', padx=PAD_X, pady=(0, PAD_Y))
+        tk.Label(filter_frame, text='Фільтр:', font=FONT_BODY, bg=BG_COLOR, fg=TEXT_MAIN).pack(side='left')
+        filter_var = tk.StringVar()
+        filter_entry = tk.Entry(filter_frame, textvariable=filter_var, font=FONT_BODY, width=40,
+                                 relief='solid', bd=1, highlightthickness=1,
+                                 highlightcolor=BORDER_FOCUS, highlightbackground=BORDER)
+        filter_entry.pack(side='left', padx=(8, 0), fill='x', expand=True)
+
+        # List with brand entries
+        frame = tk.Frame(dialog, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
+        frame.pack(fill='both', expand=True, padx=PAD_X, pady=(0, PAD_X))
+
+        canvas = tk.Canvas(frame, bg=SURFACE, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(frame, orient='vertical', command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        scrollable_frame = tk.Frame(canvas, bg=SURFACE)
+        canvas.create_window((0, 0), window=scrollable_frame, anchor='nw')
+
+        # Store entries: {sku: {'category': str, 'brand_var': StringVar, 'frame': widget}}
+        sku_entries = {}
+        row_frames = []
+
+        # Group by category for display
+        lik_items = [item for item in unmatched_items if item['category'] == 'ЛІК']
+        dd_items = [item for item in unmatched_items if item['category'] == 'ДД']
+
+        def create_sku_row(parent, item):
+            """Create a row with SKU name, category badge, and brand entry."""
+            sku = item['sku_ukr']
+            category = item['category']
+            row_frame = tk.Frame(parent, bg=SURFACE)
+            row_frame.pack(fill='x', padx=8, pady=2)
+
+            # SKU name
+            sku_lbl = tk.Label(row_frame, text=sku, font=FONT_BODY, bg=SURFACE, fg=TEXT_MAIN, anchor='w', width=40)
+            sku_lbl.pack(side='left', fill='x', expand=True)
+
+            # Category badge
+            cat_color = '#1a56a0' if category == 'ЛІК' else '#e67e22'
+            cat_lbl = tk.Label(row_frame, text=f'[{category}]', font=FONT_SMALL, bg=SURFACE, fg=cat_color)
+            cat_lbl.pack(side='left', padx=8)
+
+            # Brand entry
+            brand_var = tk.StringVar(value='')
+            brand_entry = tk.Entry(row_frame, textvariable=brand_var, font=FONT_BODY, width=25,
+                                    relief='solid', bd=1, highlightthickness=1,
+                                    highlightcolor=BORDER_FOCUS, highlightbackground=BORDER)
+            brand_entry.pack(side='left', padx=8)
+
+            return {
+                'category': category,
+                'brand_var': brand_var,
+                'frame': row_frame,
+                'sku': sku
+            }
+
+        if lik_items:
+            lbl = tk.Label(scrollable_frame, text='=== ЛІК ===', font=FONT_BOLD if 'FONT_BOLD' in globals() else ('Segoe UI', 10, 'bold'),
+                           bg=SURFACE, fg='#1a56a0', anchor='w')
+            lbl.pack(fill='x', padx=8, pady=(8, 2))
+            for item in lik_items:
+                data = create_sku_row(scrollable_frame, item)
+                sku_entries[item['sku_ukr']] = data
+                row_frames.append((item['sku_ukr'].casefold(), data['frame']))
+
+        if dd_items:
+            lbl = tk.Label(scrollable_frame, text='=== ДД ===', font=FONT_BOLD if 'FONT_BOLD' in globals() else ('Segoe UI', 10, 'bold'),
+                           bg=SURFACE, fg='#e67e22', anchor='w')
+            lbl.pack(fill='x', padx=8, pady=(8, 2))
+            for item in dd_items:
+                data = create_sku_row(scrollable_frame, item)
+                sku_entries[item['sku_ukr']] = data
+                row_frames.append((item['sku_ukr'].casefold(), data['frame']))
+
+        def apply_filter(*args):
+            search = filter_var.get().strip().casefold()
+            for sku_lower, row_frame in row_frames:
+                if search in sku_lower:
+                    row_frame.pack(fill='x', padx=8, pady=2)
+                else:
+                    row_frame.pack_forget()
+            scrollable_frame.update_idletasks()
+            canvas.config(scrollregion=canvas.bbox('all'))
+
+        filter_var.trace_add('write', apply_filter)
+
+        scrollable_frame.update_idletasks()
+        canvas.config(scrollregion=canvas.bbox('all'))
+        canvas.pack(side='left', fill='both', expand=True, padx=8, pady=8)
+        scrollbar.pack(side='right', fill='y', pady=8)
+
+        result = {'confirmed': False, 'items': None}
+
+        def confirm():
+            # Build result list
+            final_items = []
+            for sku, data in sku_entries.items():
+                brand = data['brand_var'].get().strip()
+                final_items.append({
+                    'sku_ukr': sku,
+                    'category': data['category'],
+                    'brand': brand
+                })
+            result['confirmed'] = True
+            result['items'] = final_items
+            dialog.destroy()
+
+        def cancel():
+            result['confirmed'] = False
+            result['items'] = None
+            dialog.destroy()
+
+        btn_frame = tk.Frame(dialog, bg=BG_COLOR)
+        btn_frame.pack(fill='x', padx=PAD_X, pady=PAD_Y)
+        ModernButton(btn_frame, text='Скасувати', style='secondary', command=cancel).pack(side='right', padx=(8, 0))
+        ModernButton(btn_frame, text='Зберегти і продовжити', style='success', command=confirm).pack(side='right')
+
+        # Wait for dialog to close
+        self.wait_window(dialog)
+
+        if result['confirmed']:
+            return result['items']
+        return None
 
     def _select_mhl_action_file(self):
         filename = filedialog.askopenfilename(
