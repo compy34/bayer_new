@@ -1441,10 +1441,10 @@ class SettingsDialog(tk.Toplevel):
                 self.app.status_var.set('Помилка завантаження')
                 return
 
-            # Parse both tables: first ЛИК, then after empty row - ДД
+            # Parse both tables: first ЛІК, then after empty row - ДД
             lik_skus = []
             dd_skus = []
-            current_category = 'ЛИК'  # First table is ЛИК
+            current_category = 'ЛІК'  # First table is ЛІК
 
             for i in range(header_row_idx + 1, len(rows)):
                 row = rows[i]
@@ -1456,7 +1456,7 @@ class SettingsDialog(tk.Toplevel):
                 sku_ukr = row[sku_ukr_col] if sku_ukr_col < len(row) else None
                 if sku_ukr and str(sku_ukr).strip():
                     sku_clean = str(sku_ukr).strip()
-                    if current_category == 'ЛИК':
+                    if current_category == 'ЛІК':
                         lik_skus.append(sku_clean)
                     else:
                         dd_skus.append(sku_clean)
@@ -1490,7 +1490,7 @@ class SettingsDialog(tk.Toplevel):
         y = self.winfo_rooty() + (self.winfo_height() - dialog.winfo_height()) // 2
         dialog.geometry(f'+{x}+{y}')
 
-        tk.Label(dialog, text=f'ЛИК: {len(lik_skus)} | ДД: {len(dd_skus)} (всього {len(lik_skus) + len(dd_skus)} продуктів)',
+        tk.Label(dialog, text=f'ЛІК: {len(lik_skus)} | ДД: {len(dd_skus)} (всього {len(lik_skus) + len(dd_skus)} продуктів)',
                  font=FONT_SUBTITLE, bg=BG_COLOR, fg=TEXT_MAIN).pack(anchor='w', padx=PAD_X, pady=PAD_Y)
 
         # Filter/search frame
@@ -1517,20 +1517,20 @@ class SettingsDialog(tk.Toplevel):
         checkboxes = {}
         row_frames = []
 
-        # Add ЛИК SKUs
+        # Add ЛІК SKUs
         if lik_skus:
-            lbl = tk.Label(scrollable_frame, text='=== ЛИК ===', font=FONT_BOLD if 'FONT_BOLD' in globals() else ('Segoe UI', 10, 'bold'),
+            lbl = tk.Label(scrollable_frame, text='=== ЛІК ===', font=FONT_BOLD if 'FONT_BOLD' in globals() else ('Segoe UI', 10, 'bold'),
                            bg=SURFACE, fg='#1a56a0', anchor='w')
             lbl.pack(fill='x', padx=8, pady=(8, 2))
             for sku in lik_skus:
                 is_unknown = sku.casefold() not in current_skus
                 var = tk.BooleanVar(value=is_unknown)
-                display_text = f'{sku}  [ЛИК]'
+                display_text = f'{sku}  [ЛІК]'
                 cb = tk.Checkbutton(scrollable_frame, text=display_text, variable=var,
                                      font=FONT_BODY, bg=SURFACE, fg=TEXT_MAIN,
                                      activebackground=SURFACE, anchor='w')
                 cb.pack(fill='x', padx=8, pady=2)
-                checkboxes[sku] = {'var': var, 'category': 'ЛИК', 'frame': cb}
+                checkboxes[sku] = {'var': var, 'category': 'ЛІК', 'frame': cb}
                 row_frames.append((sku.casefold(), cb))
 
         # Add ДД SKUs
