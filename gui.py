@@ -871,12 +871,37 @@ class SettingsDialog(tk.Toplevel):
             self.app.status_var.set('Продукти не знайдені')
             return
 
-        # Prepare data for DB
+        # Look up brands from database (match SKU_UKR from file with SKU_UA from DB)
+        self.app.status_var.set('Пошук брендів в базі даних...')
+        self.update_idletasks()
+        try:
+            from Data.Controller import get_all_active_skus
+            db_skus_df = get_all_active_skus()
+            # Create mapping: SKU_UA (lowercase) -> BRAND
+            sku_to_brand = {}
+            if not db_skus_df.empty:
+                for _, row in db_skus_df.iterrows():
+                    sku_key = str(row['SKU_UA']).strip().casefold()
+                    brand = str(row['BRAND']).strip()
+                    if sku_key and brand:
+                        sku_to_brand[sku_key] = brand
+        except Exception as e:
+            print(f'Warning: Could not load brands from DB: {e}')
+            sku_to_brand = {}
+
+        # Prepare data for DB with brands
         db_items = []
+        matched_count = 0
         for sku in lik_skus:
-            db_items.append({'sku_ukr': sku, 'category': 'ЛІК', 'brand': ''})
+            brand = sku_to_brand.get(sku.casefold(), '')
+            if brand:
+                matched_count += 1
+            db_items.append({'sku_ukr': sku, 'category': 'ЛІК', 'brand': brand})
         for sku in dd_skus:
-            db_items.append({'sku_ukr': sku, 'category': 'ДД', 'brand': ''})
+            brand = sku_to_brand.get(sku.casefold(), '')
+            if brand:
+                matched_count += 1
+            db_items.append({'sku_ukr': sku, 'category': 'ДД', 'brand': brand})
 
         # Save to DB
         try:
