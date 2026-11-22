@@ -932,6 +932,22 @@ class SettingsDialog(tk.Toplevel):
         ModernButton(toolbar, text='🔄 В ЛІК', style='success', command=lambda: self._bulk_change_category('ЛІК')).pack(side='left', padx=(8, 0))
         ModernButton(toolbar, text='🔄 В ДД', style='warning', command=lambda: self._bulk_change_category('ДД')).pack(side='left', padx=(8, 0))
 
+        # File selector for "для договорів" file
+        file_frame = tk.Frame(parent, bg=BG_COLOR)
+        file_frame.pack(fill='x', pady=(0, 8))
+        file_frame.columnconfigure(1, weight=1)
+
+        tk.Label(file_frame, text='Файл "для договорів":', font=FONT_BODY, bg=BG_COLOR, fg=TEXT_MAIN).grid(row=0, column=0, sticky='w', padx=(0, 10))
+        self.contract_file_var = tk.StringVar(value='')
+        contract_file_entry = tk.Entry(file_frame, textvariable=self.contract_file_var,
+                                        font=FONT_BODY, relief='solid', bd=1,
+                                        highlightthickness=1, highlightcolor=BORDER_FOCUS, highlightbackground=BORDER)
+        contract_file_entry.grid(row=0, column=1, sticky='ew', padx=(0, 10))
+        ModernButton(file_frame, text='Обрати...', style='outline',
+                    command=self._select_contract_file).grid(row=0, column=2, sticky='e', padx=(0, 8))
+        ModernButton(file_frame, text='📥 Завантажити з файлу договорів', style='primary',
+                    command=self._load_skus_from_contract_file).grid(row=0, column=3, sticky='e')
+
         # Table
         table_frame = tk.Frame(parent, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
         table_frame.pack(fill='both', expand=True)
@@ -1362,6 +1378,209 @@ class SettingsDialog(tk.Toplevel):
             dialog.destroy()
             self.app.status_var.set(f'Додано/оновлено {added} продукт(ів) до кваліфікації')
             messagebox.showinfo('Готово', f'Додано/оновлено {added} продукт(ів) до кваліфікації.', parent=self)
+
+        btn_frame = tk.Frame(dialog, bg=BG_COLOR)
+        btn_frame.pack(fill='x', padx=PAD_X, pady=PAD_Y)
+        ModernButton(btn_frame, text='Скасувати', style='secondary', command=dialog.destroy).pack(side='right', padx=(8, 0))
+        ModernButton(btn_frame, text='Додати вибране', style='success', command=add_selected).pack(side='right')
+
+    def _select_contract_file(self):
+        """Select the 'для договорів' Excel file."""
+        filename = filedialog.askopenfilename(
+            title='Виберіть файл "для договорів"',
+            initialdir=str(Path.cwd()),
+            filetypes=[('Excel', '*.xlsx *.xls'), ('Усі файли', '*.*')]
+        )
+        if filename:
+            self.contract_file_var.set(filename)
+
+    def _load_skus_from_contract_file(self):
+        """Load SKUs from the 'для договорів' file with two tables (ЛИК and ДД)."""
+        filepath = self.contract_file_var.get().strip()
+        if not filepath:
+            messagebox.showwarning('Попередження', 'Спочатку оберіть файл.', parent=self)
+            return
+
+        self.app.status_var.set('Завантаження продуктів з файлу договорів...')
+        self.update_idletasks()
+
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
+            # Find sheet "для договорів" or first sheet
+            sheet_name = None
+            for name in wb.sheetnames:
+                if 'для договор' in name.lower() or 'договор' in name.lower():
+                    sheet_name = name
+                    break
+            if sheet_name is None:
+                sheet_name = wb.sheetnames[0]
+            ws = wb[sheet_name]
+
+            # Read all rows to find the two tables
+            rows = list(ws.iter_rows(values_only=True))
+
+            # Find header row with SKU_ENG, SKU_UKR, Q3'26, %
+            header_row_idx = None
+            sku_ukr_col = None
+            for i, row in enumerate(rows):
+                if not row:
+                    continue
+                row_str = [str(c).strip() if c else '' for c in row]
+                if any('SKU_UKR' in c.upper() or 'SKU_УКР' in c.upper() for c in row_str):
+                    header_row_idx = i
+                    # Find SKU_UKR column index
+                    for j, c in enumerate(row_str):
+                        if 'SKU_UKR' in c.upper() or 'SKU_УКР' in c.upper():
+                            sku_ukr_col = j
+                            break
+                    break
+
+            if header_row_idx is None or sku_ukr_col is None:
+                messagebox.showerror('Помилка', 'Не знайдено колонку SKU_UKR у файлі.', parent=self)
+                self.app.status_var.set('Помилка завантаження')
+                return
+
+            # Parse both tables: first ЛИК, then after empty row - ДД
+            lik_skus = []
+            dd_skus = []
+            current_category = 'ЛИК'  # First table is ЛИК
+
+            for i in range(header_row_idx + 1, len(rows)):
+                row = rows[i]
+                if not row or all(c is None or str(c).strip() == '' for c in row):
+                    # Empty row - switch to ДД
+                    current_category = 'ДД'
+                    continue
+
+                sku_ukr = row[sku_ukr_col] if sku_ukr_col < len(row) else None
+                if sku_ukr and str(sku_ukr).strip():
+                    sku_clean = str(sku_ukr).strip()
+                    if current_category == 'ЛИК':
+                        lik_skus.append(sku_clean)
+                    else:
+                        dd_skus.append(sku_clean)
+
+            wb.close()
+
+        except Exception as e:
+            messagebox.showerror('Помилка', f'Не вдалося прочитати файл: {e}', parent=self)
+            self.app.status_var.set('Помилка завантаження')
+            return
+
+        if not lik_skus and not dd_skus:
+            messagebox.showinfo('Файл договорів', 'Продукти не знайдені у файлі.', parent=self)
+            self.app.status_var.set('Продукти не знайдені')
+            return
+
+        # Get current classifications
+        current_df = get_all_sku_classifications()
+        current_skus = set(current_df['SKU'].str.casefold()) if not current_df.empty else set()
+
+        # Show dialog with found SKUs
+        dialog = tk.Toplevel(self)
+        dialog.title('Продукти з файлу договорів')
+        dialog.geometry('600x500')
+        dialog.configure(bg=BG_COLOR)
+        dialog.transient(self)
+        dialog.grab_set()
+
+        dialog.update_idletasks()
+        x = self.winfo_rootx() + (self.winfo_width() - dialog.winfo_width()) // 2
+        y = self.winfo_rooty() + (self.winfo_height() - dialog.winfo_height()) // 2
+        dialog.geometry(f'+{x}+{y}')
+
+        tk.Label(dialog, text=f'ЛИК: {len(lik_skus)} | ДД: {len(dd_skus)} (всього {len(lik_skus) + len(dd_skus)} продуктів)',
+                 font=FONT_SUBTITLE, bg=BG_COLOR, fg=TEXT_MAIN).pack(anchor='w', padx=PAD_X, pady=PAD_Y)
+
+        # Filter/search frame
+        filter_frame = tk.Frame(dialog, bg=BG_COLOR)
+        filter_frame.pack(fill='x', padx=PAD_X, pady=(0, PAD_Y))
+        tk.Label(filter_frame, text='Фільтр:', font=FONT_BODY, bg=BG_COLOR, fg=TEXT_MAIN).pack(side='left')
+        filter_var = tk.StringVar()
+        filter_entry = tk.Entry(filter_frame, textvariable=filter_var, font=FONT_BODY, width=40,
+                                 relief='solid', bd=1, highlightthickness=1,
+                                 highlightcolor=BORDER_FOCUS, highlightbackground=BORDER)
+        filter_entry.pack(side='left', padx=(8, 0), fill='x', expand=True)
+
+        # List with checkboxes
+        frame = tk.Frame(dialog, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
+        frame.pack(fill='both', expand=True, padx=PAD_X, pady=(0, PAD_X))
+
+        canvas = tk.Canvas(frame, bg=SURFACE, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(frame, orient='vertical', command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        scrollable_frame = tk.Frame(canvas, bg=SURFACE)
+        canvas.create_window((0, 0), window=scrollable_frame, anchor='nw')
+
+        checkboxes = {}
+        row_frames = []
+
+        # Add ЛИК SKUs
+        if lik_skus:
+            lbl = tk.Label(scrollable_frame, text='=== ЛИК ===', font=FONT_BOLD if 'FONT_BOLD' in globals() else ('Segoe UI', 10, 'bold'),
+                           bg=SURFACE, fg='#1a56a0', anchor='w')
+            lbl.pack(fill='x', padx=8, pady=(8, 2))
+            for sku in lik_skus:
+                is_unknown = sku.casefold() not in current_skus
+                var = tk.BooleanVar(value=is_unknown)
+                display_text = f'{sku}  [ЛИК]'
+                cb = tk.Checkbutton(scrollable_frame, text=display_text, variable=var,
+                                     font=FONT_BODY, bg=SURFACE, fg=TEXT_MAIN,
+                                     activebackground=SURFACE, anchor='w')
+                cb.pack(fill='x', padx=8, pady=2)
+                checkboxes[sku] = {'var': var, 'category': 'ЛИК', 'frame': cb}
+                row_frames.append((sku.casefold(), cb))
+
+        # Add ДД SKUs
+        if dd_skus:
+            lbl = tk.Label(scrollable_frame, text='=== ДД ===', font=FONT_BOLD if 'FONT_BOLD' in globals() else ('Segoe UI', 10, 'bold'),
+                           bg=SURFACE, fg='#e67e22', anchor='w')
+            lbl.pack(fill='x', padx=8, pady=(8, 2))
+            for sku in dd_skus:
+                is_unknown = sku.casefold() not in current_skus
+                var = tk.BooleanVar(value=is_unknown)
+                display_text = f'{sku}  [ДД]'
+                cb = tk.Checkbutton(scrollable_frame, text=display_text, variable=var,
+                                     font=FONT_BODY, bg=SURFACE, fg=TEXT_MAIN,
+                                     activebackground=SURFACE, anchor='w')
+                cb.pack(fill='x', padx=8, pady=2)
+                checkboxes[sku] = {'var': var, 'category': 'ДД', 'frame': cb}
+                row_frames.append((sku.casefold(), cb))
+
+        def apply_filter(*args):
+            search = filter_var.get().strip().casefold()
+            for sku_lower, cb in row_frames:
+                if search in sku_lower:
+                    cb.pack(fill='x', padx=8, pady=2)
+                else:
+                    cb.pack_forget()
+            # Also handle section headers
+            for widget in scrollable_frame.winfo_children():
+                if isinstance(widget, tk.Label) and widget.cget('text').startswith('==='):
+                    # Check if any checkbox in this section is visible
+                    pass  # Keep headers visible for now
+            scrollable_frame.update_idletasks()
+            canvas.config(scrollregion=canvas.bbox('all'))
+
+        filter_var.trace_add('write', apply_filter)
+
+        scrollable_frame.update_idletasks()
+        canvas.config(scrollregion=canvas.bbox('all'))
+        canvas.pack(side='left', fill='both', expand=True, padx=8, pady=8)
+        scrollbar.pack(side='right', fill='y', pady=8)
+
+        def add_selected():
+            added = 0
+            for sku, data in checkboxes.items():
+                if data['var'].get():
+                    set_sku_classification(sku, data['category'], '')  # brand unknown from this file
+                    added += 1
+            self._refresh_sku_table()
+            dialog.destroy()
+            self.app.status_var.set(f'Додано/оновлено {added} продукт(ів) з файлу договорів')
+            messagebox.showinfo('Готово', f'Додано/оновлено {added} продукт(ів) з файлу договорів.', parent=self)
 
         btn_frame = tk.Frame(dialog, bg=BG_COLOR)
         btn_frame.pack(fill='x', padx=PAD_X, pady=PAD_Y)
