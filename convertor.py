@@ -1117,8 +1117,10 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
         ws.cell(mhl_total_row, col, '').font = header_font
         ws.cell(mhl_total_row, col).border = thin_border
 
-    # "Всього без ПДВ" row - use raw total purchased goods
-    total_cell = ws.cell(mhl_total_row, 6, round(service2_raw, 2))
+    # "Всього без ПДВ" row - calculate from ACTUALLY DISPLAYED MHL data rows
+    # This matches the filtered data (by brand + contract_skus), not the pre-calculated service2_raw
+    mhl_displayed_total = sum(row.get('Сума закупленого', 0) for row in mhl_data_rows)
+    total_cell = ws.cell(mhl_total_row, 6, round(mhl_displayed_total, 2))
     total_cell.font = header_font
     total_cell.alignment = right
     total_cell.number_format = '#,##0.00'
