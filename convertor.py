@@ -1024,10 +1024,19 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
 
         # Also filter by contract SKUs if contract_skus table has data for this category
         contract_skus = get_contract_skus_for_category(category_name)
+        used_contract_skus = False
         if contract_skus:
             # Normalize SKU column for comparison
             sku_values = work_df[sku_col].fillna('').astype(str).str.strip().str.casefold()
-            work_df = work_df[sku_values.isin(contract_skus)].copy()
+            filtered_df = work_df[sku_values.isin(contract_skus)].copy()
+            if not filtered_df.empty:
+                work_df = filtered_df
+                used_contract_skus = True
+            else:
+                # Fallback: contract SKUs found but none match MHL data
+                # Use brand-only filtering to avoid empty MHL section
+                print(f"Warning: contract_skus has {len(contract_skus)} SKUs for {category_name} but none match MHL data. Falling back to brand filtering.")
+                # work_df already filtered by brand above
 
         if not work_df.empty:
             # Convert numeric columns, keeping track of which were originally NULL
