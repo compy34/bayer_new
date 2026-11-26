@@ -338,7 +338,7 @@ class SettingsDialog(tk.Toplevel):
 
     def _save_contract_defaults(self):
         """Note: This only affects current session. For persistent changes, edit config.py."""
-        from config import DEFAULT_CONTRACT_NO, DEFAULT_CONTRACT_DATE, DEFAULT_TMA_CONTRACT_DATE, DEFAULT_EXECUTOR_NAME, MHL_REWARD_MULTIPLIER
+        from config import DEFAULT_CONTRACT_NO, DEFAULT_CONTRACT_DATE, DEFAULT_TMA_CONTRACT_DATE, DEFAULT_EXECUTOR_NAME, MHL_REWARD_MULTIPLIER, MHL_REWARD_TEXT_TEMPLATE
         # Update runtime config
         import config as cfg
         cfg.DEFAULT_CONTRACT_NO = self.contract_entries['DEFAULT_CONTRACT_NO'].get()
@@ -580,6 +580,26 @@ class SettingsDialog(tk.Toplevel):
 
         ModernButton(multiplier_frame, text='Зберегти', style='primary',
                     command=self._save_mhl_reward_multiplier).grid(row=0, column=3, sticky='e', padx=(10, 0))
+
+        # --- MHL Reward Text Template ---
+        tk.Label(parent, text='Текст винагороди (MHL):', font=FONT_SUBTITLE, bg=BG_COLOR, fg=TEXT_MAIN).pack(anchor='w', pady=(PAD_Y, 4))
+        tk.Label(parent, text='Доступні плейсхолдери: {contract_no}, {contract_date}', font=FONT_SMALL, bg=BG_COLOR, fg=TEXT_MUTED).pack(anchor='w', pady=(0, PAD_Y))
+
+        reward_text_frame = tk.Frame(parent, bg=BG_COLOR)
+        reward_text_frame.pack(fill='x', pady=(0, PAD_Y))
+        reward_text_frame.columnconfigure(0, weight=1)
+
+        self.mhl_reward_text_var = tk.StringVar(value=MHL_REWARD_TEXT_TEMPLATE)
+        reward_text_entry = tk.Text(reward_text_frame, font=FONT_BODY, height=3, width=80,
+                                     relief='solid', bd=1, highlightthickness=1,
+                                     highlightcolor=BORDER_FOCUS, highlightbackground=BORDER, wrap='word')
+        reward_text_entry.grid(row=0, column=0, sticky='ew', padx=(0, 10))
+        reward_text_entry.insert('1.0', MHL_REWARD_TEXT_TEMPLATE)
+
+        reward_text_btn_frame = tk.Frame(parent, bg=BG_COLOR)
+        reward_text_btn_frame.pack(fill='x', pady=(0, PAD_Y))
+        ModernButton(reward_text_btn_frame, text='Зберегти текст винагороди', style='primary',
+                    command=self._save_mhl_reward_text).pack(side='left')
 
         # --- TMA Action Percent File (TMA.xlsx) ---
         tk.Label(parent, text='Файл відсотків акції (TMA):', font=FONT_SUBTITLE, bg=BG_COLOR, fg=TEXT_MAIN).pack(anchor='w', pady=(PAD_Y, 4))
@@ -1270,6 +1290,24 @@ class SettingsDialog(tk.Toplevel):
         cfg.MHL_REWARD_MULTIPLIER = value
         self.app.status_var.set(f'MHL відсоток винагороди оновлено: {value:.2f}')
         messagebox.showinfo('Збережено', f'MHL відсоток винагороди: {value:.2f}\n(застосовано до поточної сесії)', parent=self)
+
+    def _save_mhl_reward_text(self):
+        """Save MHL reward text template to config."""
+        text = self.mhl_reward_text_var.get().strip()
+        if not text:
+            messagebox.showwarning('Помилка', 'Текст не може бути порожнім', parent=self)
+            return
+
+        # Validate placeholders
+        if '{contract_no}' not in text or '{contract_date}' not in text:
+            if not messagebox.askyesno('Попередження',
+                'Текст не містить плейсхолдери {contract_no} і/або {contract_date}.\nЦе може призвести до некоректного відображення.\nЗберегти як є?', parent=self):
+                return
+
+        import config as cfg
+        cfg.MHL_REWARD_TEXT_TEMPLATE = text
+        self.app.status_var.set('Текст винагороди MHL оновлено')
+        messagebox.showinfo('Збережено', 'Текст винагороди MHL оновлено.\n(застосовано до поточної сесії)', parent=self)
 
     # --- LA_Price Methods ---
     def _select_la_price_file(self):

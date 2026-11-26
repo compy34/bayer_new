@@ -15,6 +15,7 @@ from config import (
     DEFAULT_TMA_CONTRACT_DATE,
     DEFAULT_EXECUTOR_NAME,
     MHL_REWARD_MULTIPLIER,
+    MHL_REWARD_TEXT_TEMPLATE,
     TMA_ACTION_PERCENT_FILE,
     MHL_ACTION_PERCENT_FILE,
     LA_PRICE_FILE,
@@ -1140,12 +1141,10 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
 
     # Reward row
     mhl_reward_row = mhl_total_row + 1
-    # Hardcoded date as requested
-    reward_text = (
-        f'Виногорода за забезпечення наявності у аптечному закладі '
-        f'Товарів із Рекомендованого переліку Товару Замовника, '
-        f'згідно пункту 2.2.2 Договору про маркетингові послуги №{contract_no} '
-        f'від 27 лютого 2026 року'
+    # Use template from config (with placeholders for contract_no, contract_date)
+    reward_text = MHL_REWARD_TEXT_TEMPLATE.format(
+        contract_no=contract_no,
+        contract_date=contract_date
     )
     ws.merge_cells(start_row=mhl_reward_row, start_column=1, end_row=mhl_reward_row, end_column=5)
     cell = ws.cell(mhl_reward_row, 1, reward_text)

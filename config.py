@@ -78,6 +78,15 @@ DD_BRANDS_TEMPLATE = [
 # 0.1 = 10%
 MHL_REWARD_MULTIPLIER = 0.1
 
+# MHL reward text template (for "Винагорода..." row in MHL section)
+# Available placeholders: {contract_no}, {contract_date}
+MHL_REWARD_TEXT_TEMPLATE = (
+    'Виногорода за забезпечення наявності у аптечному закладі '
+    'Товарів із Рекомендованого переліку Товару Замовника, '
+    'згідно пункту 2.2.2 Договору про маркетингові послуги №{contract_no} '
+    'від {contract_date}'
+)
+
 # TMA action percentage file path (for "під час акції" sheets - TMA)
 # Default file: TMA.xlsx, sheet "Sheet1" or first sheet, columns: SKU_UKR -> %
 TMA_ACTION_PERCENT_FILE = "TMA.xlsx"
