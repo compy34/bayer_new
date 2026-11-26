@@ -83,6 +83,10 @@ def generate_act_sheet(
         executor_name = str(
             matched_row.get('Виконавець', matched_row.get('Юридическое лицо', executor_name))
         )
+        # Юридическое лицо — для використання в рядку "між ТОВ "БАЙЄР" та ..."
+        legal_entity = str(
+            matched_row.get('Юридическое лицо', matched_row.get('Виконавець', executor_name))
+        )
         # Замовник — пробуємо різні варіанти назв колонки
         customer_name = customer_name  # default
         for col in CLIENT_COL_VARIANTS:
@@ -118,9 +122,9 @@ def generate_act_sheet(
     ws['A2'].alignment = center_alignment
     ws.row_dimensions[2].height = 30
 
-    # Row 3: "між ТОВ "БАЙЄР" та {Клиент из базы данных}"
+    # Row 3: "між ТОВ "БАЙЄР" та {Юридическое лицо}"
     ws.merge_cells('A3:E3')
-    ws['A3'] = f'між ТОВ «БАЙЄР» та {customer_name}'
+    ws['A3'] = f'між ТОВ «БАЙЄР» та {legal_entity}'
     ws['A3'].font = Font(bold=True, size=10)
     ws['A3'].alignment = center_alignment
     ws.row_dimensions[3].height = 30
