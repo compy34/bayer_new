@@ -187,17 +187,16 @@ def generate_act_sheet(
     ws.row_dimensions[14].height = 25
 
     # Послуга 1: Викладка
-    # Input amounts already include VAT, extract without-VAT amount
-    sum1_with_vat = float(service1_sum)
-    sum1_no_vat = round(sum1_with_vat / 1.2, 2)
+    # Input amounts are WITHOUT VAT (same as in report/zvit)
+    sum1_no_vat = float(service1_sum)
     vat1 = round(sum1_no_vat * 0.2, 2)
-    total1 = sum1_with_vat
+    total1 = round(sum1_no_vat + vat1, 2)
 
     # Послуга 2: Наявність (MHL)
-    sum2_with_vat = float(service2_sum)
-    sum2_no_vat = round(sum2_with_vat / 1.2, 2)
+    # service2_sum = reward_amount (WITHOUT VAT, matches MHL section "Всього без ПДВ")
+    sum2_no_vat = float(service2_sum)
     vat2 = round(sum2_no_vat * 0.2, 2)
-    total2 = sum2_with_vat
+    total2 = round(sum2_no_vat + vat2, 2)
 
     services_data = [
         (
