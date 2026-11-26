@@ -1982,9 +1982,14 @@ def generate_excel_report(
         if matched_row is None:
             matched_row = df_req.iloc[0]
 
-        executor = str(
-            matched_row.get('Виконавець', matched_row.get('Юридическое лицо', DEFAULT_EXECUTOR_NAME))
-        )
+        # Виконавець — використовуємо вибрану аптеку/мережу, якщо вибрано конкретну
+        if clean_selected and clean_selected != 'Усі аптеки':
+            executor = clean_selected
+        else:
+            # Якщо "Усі аптеки" — беремо з реквізитів (Виконавець або Юридическое лицо)
+            executor = str(
+                matched_row.get('Виконавець', matched_row.get('Юридическое лицо', DEFAULT_EXECUTOR_NAME))
+            )
         contract_no = str(matched_row.get('№ договора', DEFAULT_CONTRACT_NO))
         contract_date = str(matched_row.get('Дата договора', DEFAULT_CONTRACT_DATE))
         return executor, contract_no, contract_date
