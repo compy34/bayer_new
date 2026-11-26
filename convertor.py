@@ -1960,38 +1960,47 @@ def generate_excel_report(
     # Helper to extract contract details from requisites
     def _extract_contract_details(df_req, pharmacy_name):
         """Extract executor_name, contract_no, contract_date from requisites for a pharmacy."""
-        if df_req is None or df_req.empty:
-            return DEFAULT_EXECUTOR_NAME, DEFAULT_CONTRACT_NO, DEFAULT_CONTRACT_DATE
-
         clean_selected = str(pharmacy_name).strip()
-        target_col = None
-        for col_candidate in ['chain_name', 'Клиент из базы данных', 'Мережа', 'Назва']:
-            if col_candidate in df_req.columns:
-                target_col = col_candidate
-                break
-
-        matched_row = None
-        if clean_selected and clean_selected != 'Усі аптеки' and target_col:
-            filtered_req = df_req[
-                df_req[target_col].astype(str).str.strip().str.lower()
-                == clean_selected.lower()
-            ]
-            if not filtered_req.empty:
-                matched_row = filtered_req.iloc[0]
-
-        if matched_row is None:
-            matched_row = df_req.iloc[0]
 
         # Виконавець — використовуємо вибрану аптеку/мережу, якщо вибрано конкретну
+        # ( навіть якщо файл реквізитів не завантажено або порожній )
         if clean_selected and clean_selected != 'Усі аптеки':
             executor = clean_selected
         else:
-            # Якщо "Усі аптеки" — беремо з реквізитів (Виконавець або Юридическое лицо)
-            executor = str(
-                matched_row.get('Виконавець', matched_row.get('Юридическое лицо', DEFAULT_EXECUTOR_NAME))
-            )
-        contract_no = str(matched_row.get('№ договора', DEFAULT_CONTRACT_NO))
-        contract_date = str(matched_row.get('Дата договора', DEFAULT_CONTRACT_DATE))
+            executor = DEFAULT_EXECUTOR_NAME
+
+        contract_no = DEFAULT_CONTRACT_NO
+        contract_date = DEFAULT_CONTRACT_DATE
+
+        # Якщо є файл реквізитів, спробуємо дістати номер/дату договору
+        if df_req is not None and not df_req.empty:
+            target_col = None
+            for col_candidate in ['chain_name', 'Клиент из базы данных', 'Мережа', 'Назва']:
+                if col_candidate in df_req.columns:
+                    target_col = col_candidate
+                    break
+
+            matched_row = None
+            if clean_selected and clean_selected != 'Усі аптеки' and target_col:
+                filtered_req = df_req[
+                    df_req[target_col].astype(str).str.strip().str.lower()
+                    == clean_selected.lower()
+                ]
+                if not filtered_req.empty:
+                    matched_row = filtered_req.iloc[0]
+
+            if matched_row is None:
+                matched_row = df_req.iloc[0]
+
+            # Якщо "Усі аптеки" — беремо Виконавець з реквізитів
+            if clean_selected == 'Усі аптеки' or not clean_selected:
+                executor = str(
+                    matched_row.get('Виконавець', matched_row.get('Юридическое лицо', DEFAULT_EXECUTOR_NAME))
+                )
+
+            contract_no = str(matched_row.get('№ договора', DEFAULT_CONTRACT_NO))
+            contract_date = str(matched_row.get('Дата договора', DEFAULT_CONTRACT_DATE))
+
         return executor, contract_no, contract_date
 
     # Extract contract details separately for ЛИК and ДД
