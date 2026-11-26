@@ -15,6 +15,7 @@ from config import (
     LIK_BRANDS_TEMPLATE,
     DD_BRANDS_TEMPLATE,
     MHL_REWARD_MULTIPLIER,
+    MHL_REWARD_TEXT_TEMPLATE,
     TMA_ACTION_PERCENT_FILE,
     MHL_ACTION_PERCENT_FILE,
     LA_PRICE_FILE,
@@ -196,7 +197,17 @@ class SettingsDialog(tk.Toplevel):
         notebook.add(db_import_frame, text='  📂 Завантаження в БД  ')
         self._build_db_import_tab(db_import_frame)
 
-        # --- Tab 7: Brand/SKU Qualification ---
+        # --- Tab 7: Active Products (from contract_skus) ---
+        active_frame = tk.Frame(notebook, bg=BG_COLOR)
+        notebook.add(active_frame, text='  Активні продукти  ')
+        self._build_active_products_tab(active_frame)
+
+        # --- Tab 8: Inactive Products (not in contract_skus) ---
+        inactive_frame = tk.Frame(notebook, bg=BG_COLOR)
+        notebook.add(inactive_frame, text='  Неактивні продукти  ')
+        self._build_inactive_products_tab(inactive_frame)
+
+        # --- Tab 9: Brand/SKU Qualification ---
         brand_frame = tk.Frame(notebook, bg=BG_COLOR)
         notebook.add(brand_frame, text='  Кваліфікація брендів  ')
         self._build_brand_tab(brand_frame)
@@ -1152,6 +1163,303 @@ class SettingsDialog(tk.Toplevel):
         if result['confirmed']:
             return result['items']
         return None
+
+    # ============================================================
+    # ACTIVE/INACTIVE PRODUCTS TABS
+    # ============================================================
+
+    def _build_active_products_tab(self, parent):
+        """Tab showing active products from contract_skus table with ЛИК/ДД separation."""
+        tk.Label(
+            parent,
+            text='Активні продукти з таблиці contract_skus (завантажені з файлу "для договорів").\nГрупування за категоріями: ЛІК та ДД.',
+            font=FONT_SMALL, bg=BG_COLOR, fg=TEXT_MUTED, wraplength=600, justify='left'
+        ).pack(anchor='w', pady=(0, PAD_Y))
+
+        # Toolbar
+        toolbar = tk.Frame(parent, bg=BG_COLOR)
+        toolbar.pack(fill='x', pady=(0, 8))
+
+        ModernButton(toolbar, text='🔄 Оновити', style='secondary', command=lambda: self._refresh_active_products_tab(active_tree)).pack(side='left', padx=(0, 8))
+        ModernButton(toolbar, text='🗑 Видалити вибране', style='danger', command=lambda: self._delete_selected_active_products(active_tree)).pack(side='left', padx=(0, 8))
+
+        # Info label
+        self.active_products_status_var = tk.StringVar(value='Завантаження...')
+        tk.Label(toolbar, textvariable=self.active_products_status_var, font=FONT_SMALL, bg=BG_COLOR, fg=TEXT_MUTED).pack(side='left', padx=(16, 0))
+
+        # Table
+        table_frame = tk.Frame(parent, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
+        table_frame.pack(fill='both', expand=True)
+
+        columns = ('SKU', 'BRAND', 'CATEGORY', 'CREATED', 'UPDATED')
+        active_tree = ttk.Treeview(table_frame, columns=columns, show='headings', selectmode='extended')
+
+        col_config = {
+            'SKU': ('Продукт (SKU)', 300),
+            'BRAND': ('Бренд', 180),
+            'CATEGORY': ('Категорія', 100),
+            'CREATED': ('Створено', 150),
+            'UPDATED': ('Оновлено', 150),
+        }
+        for col, (title, width) in col_config.items():
+            active_tree.heading(col, text=title)
+            active_tree.column(col, width=width, anchor='w' if col != 'CATEGORY' else 'center')
+
+        # Scrollbars
+        vsb = ttk.Scrollbar(table_frame, orient='vertical', command=active_tree.yview)
+        hsb = ttk.Scrollbar(table_frame, orient='horizontal', command=active_tree.xview)
+        active_tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+
+        active_tree.grid(row=0, column=0, sticky='nsew')
+        vsb.grid(row=0, column=1, sticky='ns')
+        hsb.grid(row=1, column=0, sticky='ew')
+        table_frame.grid_rowconfigure(0, weight=1)
+        table_frame.grid_columnconfigure(0, weight=1)
+
+        # Configure tags for color coding
+        active_tree.tag_configure('ЛІК', background='#e8eef7')
+        active_tree.tag_configure('ДД', background='#fef3e2')
+
+        # Store reference for refresh
+        self.active_products_tree = active_tree
+
+        # Initial load
+        self._refresh_active_products_tab(active_tree)
+
+    def _refresh_active_products_tab(self, tree):
+        """Refresh the active products table from contract_skus."""
+        # Clear tree
+        for item in tree.get_children():
+            tree.delete(item)
+
+        try:
+            from Data.Controller import load_contract_skus, create_contract_skus_table
+            create_contract_skus_table()  # Ensure table exists
+            df = load_contract_skus()
+        except Exception as e:
+            self.active_products_status_var.set(f'Помилка завантаження: {e}')
+            return
+
+        if df.empty:
+            self.active_products_status_var.set('Таблиця contract_skus: порожня')
+            return
+
+        lik_count = len(df[df['category'] == 'ЛІК'])
+        dd_count = len(df[df['category'] == 'ДД'])
+        self.active_products_status_var.set(f'Активні продукти: {len(df)} (ЛІК: {lik_count}, ДД: {dd_count})')
+
+        for _, row in df.iterrows():
+            sku = str(row['sku_ukr']).strip()
+            category = str(row['category']).strip().upper()
+            brand = str(row['brand']).strip() if pd.notna(row['brand']) else ''
+            created = str(row['created_at']) if 'created_at' in row and pd.notna(row['created_at']) else ''
+            updated = str(row['updated_at']) if 'updated_at' in row and pd.notna(row['updated_at']) else ''
+            tree.insert('', 'end', values=(sku, brand, category, created, updated), tags=(category,))
+
+    def _delete_selected_active_products(self, tree):
+        """Delete selected products from contract_skus table."""
+        selected = tree.selection()
+        if not selected:
+            messagebox.showwarning('Попередження', 'Оберіть продукти для видалення.', parent=self)
+            return
+
+        if not messagebox.askyesno('Підтвердження', f'Видалити {len(selected)} продукт(ів) з таблиці contract_skus?', parent=self):
+            return
+
+        try:
+            from Data.Controller import delete_contract_sku
+            deleted = 0
+            for item in selected:
+                values = tree.item(item, 'values')
+                sku = values[0]
+                if delete_contract_sku(sku):
+                    deleted += 1
+
+            self._refresh_active_products_tab(tree)
+            self.app.status_var.set(f'Видалено {deleted} продукт(ів) з contract_skus')
+            messagebox.showinfo('Готово', f'Видалено {deleted} продукт(ів).', parent=self)
+        except Exception as e:
+            messagebox.showerror('Помилка', f'Не вдалося видалити: {e}', parent=self)
+
+    def _build_inactive_products_tab(self, parent):
+        """Tab showing inactive products (from DB but not in contract_skus) with ЛИК/ДД separation."""
+        tk.Label(
+            parent,
+            text='Продукти з бази даних (key_SKU + calc_KA), які НЕ знаходяться в таблиці contract_skus.\nЦе продукти-кандидати для додавання в кваліфікацію. Групування: ЛІК та ДД.',
+            font=FONT_SMALL, bg=BG_COLOR, fg=TEXT_MUTED, wraplength=600, justify='left'
+        ).pack(anchor='w', pady=(0, PAD_Y))
+
+        # Toolbar
+        toolbar = tk.Frame(parent, bg=BG_COLOR)
+        toolbar.pack(fill='x', pady=(0, 8))
+
+        ModernButton(toolbar, text='🔄 Оновити', style='secondary', command=lambda: self._refresh_inactive_products_tab(inactive_tree)).pack(side='left', padx=(0, 8))
+        ModernButton(toolbar, text='➕ Додати вибране в contract_skus', style='success', command=lambda: self._add_selected_to_contract_skus(inactive_tree)).pack(side='left', padx=(0, 8))
+
+        # Filter frame
+        filter_frame = tk.Frame(parent, bg=BG_COLOR)
+        filter_frame.pack(fill='x', pady=(0, 8))
+        tk.Label(filter_frame, text='Фільтр:', font=FONT_BODY, bg=BG_COLOR, fg=TEXT_MAIN).pack(side='left')
+        self.inactive_filter_var = tk.StringVar()
+        filter_entry = tk.Entry(filter_frame, textvariable=self.inactive_filter_var, font=FONT_BODY, width=40,
+                                 relief='solid', bd=1, highlightthickness=1,
+                                 highlightcolor=BORDER_FOCUS, highlightbackground=BORDER)
+        filter_entry.pack(side='left', padx=(8, 0), fill='x', expand=True)
+
+        # Info label
+        self.inactive_products_status_var = tk.StringVar(value='Завантаження...')
+        tk.Label(filter_frame, textvariable=self.inactive_products_status_var, font=FONT_SMALL, bg=BG_COLOR, fg=TEXT_MUTED).pack(side='left', padx=(16, 0))
+
+        # Table
+        table_frame = tk.Frame(parent, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
+        table_frame.pack(fill='both', expand=True)
+
+        columns = ('SKU', 'BRAND', 'CATEGORY')
+        inactive_tree = ttk.Treeview(table_frame, columns=columns, show='headings', selectmode='extended')
+
+        col_config = {
+            'SKU': ('Продукт (SKU)', 350),
+            'BRAND': ('Бренд', 180),
+            'CATEGORY': ('Категорія', 100),
+        }
+        for col, (title, width) in col_config.items():
+            inactive_tree.heading(col, text=title)
+            inactive_tree.column(col, width=width, anchor='w' if col != 'CATEGORY' else 'center')
+
+        # Scrollbars
+        vsb = ttk.Scrollbar(table_frame, orient='vertical', command=inactive_tree.yview)
+        hsb = ttk.Scrollbar(table_frame, orient='horizontal', command=inactive_tree.xview)
+        inactive_tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+
+        inactive_tree.grid(row=0, column=0, sticky='nsew')
+        vsb.grid(row=0, column=1, sticky='ns')
+        hsb.grid(row=1, column=0, sticky='ew')
+        table_frame.grid_rowconfigure(0, weight=1)
+        table_frame.grid_columnconfigure(0, weight=1)
+
+        # Configure tags for color coding
+        inactive_tree.tag_configure('ЛІК', background='#e8eef7')
+        inactive_tree.tag_configure('ДД', background='#fef3e2')
+
+        # Store reference for refresh
+        self.inactive_products_tree = inactive_tree
+
+        # Initial load
+        self._refresh_inactive_products_tab(inactive_tree)
+
+        # Bind filter
+        self.inactive_filter_var.trace_add('write', lambda *args: self._apply_inactive_filter(inactive_tree))
+
+    def _apply_inactive_filter(self, tree):
+        """Apply filter to inactive products tree."""
+        search = self.inactive_filter_var.get().strip().casefold()
+        for item in tree.get_children():
+            values = tree.item(item, 'values')
+            sku = str(values[0]).casefold()
+            brand = str(values[1]).casefold()
+            if search in sku or search in brand:
+                tree.reattach(item, '', 'end')
+            else:
+                tree.detach(item)
+
+    def _refresh_inactive_products_tab(self, tree):
+        """Refresh the inactive products table from DB (products not in contract_skus)."""
+        # Clear tree
+        for item in tree.get_children():
+            tree.delete(item)
+
+        try:
+            from Data.Controller import load_contract_skus, get_all_active_skus, create_contract_skus_table
+            create_contract_skus_table()  # Ensure table exists
+
+            # Get contract SKUs
+            contract_df = load_contract_skus()
+            contract_skus = set()
+            if not contract_df.empty:
+                contract_skus = set(contract_df['sku_ukr'].astype(str).str.strip().str.casefold())
+
+            # Get all active SKUs from DB
+            db_skus_df = get_all_active_skus()
+        except Exception as e:
+            self.inactive_products_status_var.set(f'Помилка завантаження: {e}')
+            return
+
+        if db_skus_df.empty:
+            self.inactive_products_status_var.set('База даних: продукти не знайдені')
+            return
+
+        # Determine category for each SKU based on brand mapping
+        lik_brands_set = set(b.casefold() for b in LIK_BRANDS_TEMPLATE)
+        dd_brands_set = set(b.casefold() for b in DD_BRANDS_TEMPLATE)
+
+        lik_count = 0
+        dd_count = 0
+        skipped_count = 0
+
+        for _, row in db_skus_df.iterrows():
+            sku = str(row['SKU_UA']).strip()
+            brand = str(row['BRAND']).strip()
+            sku_lower = sku.casefold()
+
+            # Skip if already in contract_skus
+            if sku_lower in contract_skus:
+                skipped_count += 1
+                continue
+
+            # Determine category from brand
+            brand_lower = brand.casefold()
+            if brand_lower in lik_brands_set:
+                category = 'ЛІК'
+            elif brand_lower in dd_brands_set:
+                category = 'ДД'
+            else:
+                # Default to ЛІК if brand not recognized
+                category = 'ЛІК'
+
+            if category == 'ЛІК':
+                lik_count += 1
+            else:
+                dd_count += 1
+
+            tree.insert('', 'end', values=(sku, brand, category), tags=(category,))
+
+        self.inactive_products_status_var.set(f'Неактивні продукти: {lik_count + dd_count} (ЛІК: {lik_count}, ДД: {dd_count}), пропущено (вже в contract_skus): {skipped_count}')
+
+    def _add_selected_to_contract_skus(self, tree):
+        """Add selected inactive products to contract_skus table."""
+        selected = tree.selection()
+        if not selected:
+            messagebox.showwarning('Попередження', 'Оберіть продукти для додавання.', parent=self)
+            return
+
+        try:
+            from Data.Controller import create_contract_skus_table, save_contract_skus
+            create_contract_skus_table()
+
+            items_to_add = []
+            for item in selected:
+                values = tree.item(item, 'values')
+                sku = str(values[0]).strip()
+                brand = str(values[1]).strip()
+                category = str(values[2]).strip().upper()
+                if category not in ('ЛІК', 'ДД'):
+                    category = 'ЛІК'
+                items_to_add.append({'sku_ukr': sku, 'category': category, 'brand': brand})
+
+            saved, err = save_contract_skus(items_to_add)
+            if err:
+                messagebox.showerror('Помилка БД', f'Не вдалося зберегти: {err}', parent=self)
+                return
+
+            self._refresh_inactive_products_tab(tree)
+            # Also refresh active products tab if visible
+            if hasattr(self, 'active_products_tree'):
+                self._refresh_active_products_tab(self.active_products_tree)
+
+            self.app.status_var.set(f'Додано {saved} продукт(ів) в contract_skus')
+            messagebox.showinfo('Готово', f'Успішно додано {saved} продукт(ів) в таблицю contract_skus.', parent=self)
+        except Exception as e:
+            messagebox.showerror('Помилка', f'Не вдалося додати в contract_skus: {e}', parent=self)
 
     def _select_mhl_action_file(self):
         filename = filedialog.askopenfilename(
