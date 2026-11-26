@@ -1155,8 +1155,9 @@ def fill_zvit_worksheet(ws, pivot_df, template_brands, period_str, period_end_uk
     for col in range(2, 6):
         ws.cell(mhl_reward_row, col).border = thin_border
 
-    # Reward amount - use pre-calculated reward
-    reward_amount = round(service2_reward, 2)
+    # Reward amount - calculate from DISPLAYED MHL total * percentage from GUI
+    # This matches the "ВСЬОГО закупленого товару" row which uses contract_skus filtering
+    reward_amount = round(mhl_displayed_total * MHL_REWARD_MULTIPLIER, 2)
     reward_cell = ws.cell(mhl_reward_row, 6, reward_amount)
     reward_cell.font = header_font
     reward_cell.alignment = right
