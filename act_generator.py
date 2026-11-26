@@ -58,6 +58,7 @@ def generate_act_sheet(
     ]
 
     customer_name = 'ТОВ «БАЙЄР»'
+    legal_entity = 'ТОВ «БАЙЄР»'  # default for row 3
 
     if df_req is not None and not df_req.empty:
         matched_row = None
