@@ -725,6 +725,7 @@ def get_mhl_availability_sum(mhl_df, template_brands):
     """Calculate MHL availability service sum (Service 2) from MHL data.
     This corresponds to the 'наявність' service - sum of purchased goods where penetration >= target.
     Local penetration target overrides are applied from penetration_targets.json.
+    Also filters by contract_skus table (same as report MHL section) for consistency.
     """
     if mhl_df is None or mhl_df.empty:
         return 0.0
@@ -744,6 +745,25 @@ def get_mhl_availability_sum(mhl_df, template_brands):
     if work_df.empty:
         return 0.0
 
+    # Also filter by contract SKUs if contract_skus table has data for this category
+    # This matches the filtering in fill_zvit_worksheet MHL section
+    category_name = 'ЛІК' if is_lic else 'ДД'
+    contract_skus = get_contract_skus_for_category(category_name)
+    if contract_skus:
+        sku_col = 'SKU_UA' if 'SKU_UA' in work_df.columns else 'Назва товару'
+        # Normalize SKU column for comparison
+        sku_values = work_df[sku_col].fillna('').astype(str).str.strip().str.casefold()
+        filtered_df = work_df[sku_values.isin(contract_skus)].copy()
+        if not filtered_df.empty:
+            work_df = filtered_df
+        else:
+            # Fallback: contract SKUs found but none match MHL data
+            # Use brand-only filtering to avoid empty MHL section
+            print(f"Warning: contract_skus has {len(contract_skus)} SKUs for {category_name} but none match MHL data. Falling back to brand filtering.")
+
+    if work_df.empty:
+        return 0.0
+
     # Convert numeric columns
     for column in ['PENETRATION', 'PRICE_CP', 'SUPPLY', 'PENETRATION_TARGET']:
         work_df[column] = pd.to_numeric(work_df[column], errors='coerce')
@@ -752,6 +772,7 @@ def get_mhl_availability_sum(mhl_df, template_brands):
     local_targets = load_penetration_targets()
     if local_targets:
         # Create a mapping from normalized SKU_UA to local target
+        sku_col = 'SKU_UA' if 'SKU_UA' in work_df.columns else 'Назва товару'
         work_df['sku_normalized'] = work_df[sku_col].fillna('').astype(str).str.strip().str.casefold()
         work_df['local_target'] = work_df['sku_normalized'].map(local_targets)
         # Use local target where available, otherwise fall back to database PENETRATION_TARGET
