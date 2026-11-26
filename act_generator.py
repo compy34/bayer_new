@@ -80,10 +80,14 @@ def generate_act_sheet(
         if matched_row is None:
             matched_row = df_req.iloc[0]
 
-        # Виконавець — з колонки "Виконавець" або "Юридическое лицо"
-        executor_name = str(
-            matched_row.get('Виконавець', matched_row.get('Юридическое лицо', executor_name))
-        )
+        # Виконавець — використовуємо вибрану аптеку/мережу, якщо вибрано конкретну
+        if clean_selected and clean_selected != 'Усі аптеки':
+            executor_name = clean_selected
+        else:
+            # Якщо "Усі аптеки" — беремо з реквізитів (Виконавець або Юридическое лицо)
+            executor_name = str(
+                matched_row.get('Виконавець', matched_row.get('Юридическое лицо', executor_name))
+            )
         # Юридическое лицо — для використання в рядку "між ТОВ "БАЙЄР" та ..."
         legal_entity = str(
             matched_row.get('Юридическое лицо', matched_row.get('Виконавець', executor_name))
@@ -405,10 +409,14 @@ def generate_tma_act_sheet(
         if matched_row is None:
             matched_row = df_req.iloc[0]
 
-        # Виконавець
-        executor_name = str(
-            matched_row.get('Виконавець', matched_row.get('Юридическое лицо', executor_name))
-        )
+        # Виконавець — використовуємо вибрану аптеку/мережу, якщо вибрано конкретну
+        if clean_selected and clean_selected != 'Усі аптеки':
+            executor_name = clean_selected
+        else:
+            # Якщо "Усі аптеки" — беремо з реквізитів (Виконавець або Юридическое лицо)
+            executor_name = str(
+                matched_row.get('Виконавець', matched_row.get('Юридическое лицо', executor_name))
+            )
         # Замовник — пробуємо різні варіанти назв колонки
         for col in CLIENT_COL_VARIANTS:
             if col in matched_row.index and pd.notna(matched_row[col]) and str(matched_row[col]).strip():
