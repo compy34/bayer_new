@@ -110,11 +110,18 @@ def generate_act_sheet(
 
         # Юридическое лицо — для використання в рядку "між ТОВ "БАЙЄР" та ..."
         # ONLY use 'Юридическое лицо' column for legal entity
-        # If not available or invalid, fall back to executor_name
+        # If not available or invalid, fall back to executor from requisites (Виконавець/Юридическое лицо)
         # Final safety: if legal_entity still looks like client identifier, use safe default
         legal_entity_val = matched_row.get('Юридическое лицо')
         if not _is_valid_entity(legal_entity_val):
-            legal_entity_val = executor_name
+            # Fallback to executor from requisites file (not user selection)
+            fallback_executor = matched_row.get('Виконавець')
+            if not _is_valid_entity(fallback_executor):
+                fallback_executor = matched_row.get('Юридическое лицо')
+            if _is_valid_entity(fallback_executor):
+                legal_entity_val = fallback_executor
+            else:
+                legal_entity_val = executor_name
         # Final safety check
         if not _is_valid_entity(legal_entity_val):
             legal_entity_val = clean_selected if clean_selected and clean_selected != 'Усі аптеки' else DEFAULT_EXECUTOR_NAME
@@ -433,9 +440,9 @@ def generate_tma_act_sheet(
         return True
 
     # Extract data from requisites
+    clean_selected = str(selected_pharmacy).strip()
+    matched_row = None
     if df_req is not None and not df_req.empty:
-        matched_row = None
-        clean_selected = str(selected_pharmacy).strip()
         target_col = None
         for col_candidate in ['chain_name'] + CLIENT_COL_VARIANTS + ['Мережа', 'Назва']:
             if col_candidate in df_req.columns:
@@ -481,9 +488,19 @@ def generate_tma_act_sheet(
             ]
 
     # Legal entity for "між ТОВ «БАЙЄР» та {юридическое лицо}" - use 'Юридическое лицо' from requisites
-    legal_entity_val = matched_row.get('Юридическое лицо') if df_req is not None and not df_req.empty else None
-    if not _is_valid_entity(legal_entity_val):
-        legal_entity_val = executor_name
+    if df_req is not None and not df_req.empty:
+        legal_entity_val = matched_row.get('Юридическое лицо')
+        if not _is_valid_entity(legal_entity_val):
+            # Fallback to executor from requisites file (not user selection)
+            fallback_executor = matched_row.get('Виконавець')
+            if not _is_valid_entity(fallback_executor):
+                fallback_executor = matched_row.get('Юридическое лицо')
+            if _is_valid_entity(fallback_executor):
+                legal_entity_val = fallback_executor
+            else:
+                legal_entity_val = executor_name
+    else:
+        legal_entity_val = None
     if not _is_valid_entity(legal_entity_val):
         legal_entity_val = clean_selected if clean_selected and clean_selected != 'Усі аптеки' else DEFAULT_EXECUTOR_NAME
     network_name = str(legal_entity_val)
