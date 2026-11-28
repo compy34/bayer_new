@@ -417,6 +417,21 @@ def generate_tma_act_sheet(
 
     customer_name = 'ТОВ «БАЙЄР»'
 
+    # Helper to validate values aren't client identifiers
+    def _is_valid_entity(val):
+        if val is None:
+            return False
+        if isinstance(val, float) and pd.isna(val):
+            return False
+        s = str(val).strip()
+        if not s:
+            return False
+        s_lower = s.lower()
+        client_keywords = ['клиент', 'база', 'customer', 'client', 'покупець', 'замовник']
+        if any(kw in s_lower for kw in client_keywords):
+            return False
+        return True
+
     # Extract data from requisites
     if df_req is not None and not df_req.empty:
         matched_row = None
@@ -437,21 +452,6 @@ def generate_tma_act_sheet(
 
         if matched_row is None:
             matched_row = df_req.iloc[0]
-
-        # Helper to validate values aren't client identifiers
-        def _is_valid_entity(val):
-            if val is None:
-                return False
-            if isinstance(val, float) and pd.isna(val):
-                return False
-            s = str(val).strip()
-            if not s:
-                return False
-            s_lower = s.lower()
-            client_keywords = ['клиент', 'база', 'customer', 'client', 'покупець', 'замовник']
-            if any(kw in s_lower for kw in client_keywords):
-                return False
-            return True
 
         # Виконавець — використовуємо вибрану аптеку/мережу, якщо вибрано конкретну
         if clean_selected and clean_selected != 'Усі аптеки':
