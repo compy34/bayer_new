@@ -109,9 +109,10 @@ def generate_act_sheet(
                 return False
             return True
 
+        # ONLY use 'Юридическое лицо' column for legal entity
+        # If not available or invalid, fall back directly to executor_name
+        # (Don't use 'Виконавець' as fallback for legal_entity - it might contain client data)
         legal_entity_val = matched_row.get('Юридическое лицо')
-        if not _is_valid_legal_entity(legal_entity_val):
-            legal_entity_val = matched_row.get('Виконавець')
         if not _is_valid_legal_entity(legal_entity_val):
             legal_entity_val = executor_name
         legal_entity = str(legal_entity_val)
