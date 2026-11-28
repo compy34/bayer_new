@@ -58,7 +58,7 @@ def generate_act_sheet(
     ]
 
     customer_name = 'ТОВ «БАЙЄР»'
-    legal_entity = 'ТОВ «БАЙЄР»'  # default for row 3
+    legal_entity = executor_name  # default for row 3 - use executor name if no requisites
 
     if df_req is not None and not df_req.empty:
         matched_row = None
@@ -85,13 +85,20 @@ def generate_act_sheet(
             executor_name = clean_selected
         else:
             # Якщо "Усі аптеки" — беремо з реквізитів (Виконавець або Юридическое лицо)
-            executor_name = str(
-                matched_row.get('Виконавець', matched_row.get('Юридическое лицо', executor_name))
-            )
+            executor_val = matched_row.get('Виконавець')
+            if executor_val is None or (isinstance(executor_val, float) and pd.isna(executor_val)) or not str(executor_val).strip():
+                executor_val = matched_row.get('Юридическое лицо')
+            if executor_val is None or (isinstance(executor_val, float) and pd.isna(executor_val)) or not str(executor_val).strip():
+                executor_val = executor_name
+            executor_name = str(executor_val)
         # Юридическое лицо — для використання в рядку "між ТОВ "БАЙЄР" та ..."
-        legal_entity = str(
-            matched_row.get('Юридическое лицо', matched_row.get('Виконавець', executor_name))
-        )
+        # Handle NaN values - get value and check if it's valid
+        legal_entity_val = matched_row.get('Юридическое лицо')
+        if legal_entity_val is None or (isinstance(legal_entity_val, float) and pd.isna(legal_entity_val)) or not str(legal_entity_val).strip():
+            legal_entity_val = matched_row.get('Виконавець')
+        if legal_entity_val is None or (isinstance(legal_entity_val, float) and pd.isna(legal_entity_val)) or not str(legal_entity_val).strip():
+            legal_entity_val = executor_name
+        legal_entity = str(legal_entity_val)
         # Замовник — пробуємо різні варіанти назв колонки
         customer_name = customer_name  # default
         for col in CLIENT_COL_VARIANTS:
@@ -416,9 +423,12 @@ def generate_tma_act_sheet(
             executor_name = clean_selected
         else:
             # Якщо "Усі аптеки" — беремо з реквізитів (Виконавець або Юридическое лицо)
-            executor_name = str(
-                matched_row.get('Виконавець', matched_row.get('Юридическое лицо', executor_name))
-            )
+            executor_val = matched_row.get('Виконавець')
+            if executor_val is None or (isinstance(executor_val, float) and pd.isna(executor_val)) or not str(executor_val).strip():
+                executor_val = matched_row.get('Юридическое лицо')
+            if executor_val is None or (isinstance(executor_val, float) and pd.isna(executor_val)) or not str(executor_val).strip():
+                executor_val = executor_name
+            executor_name = str(executor_val)
         # Замовник — пробуємо різні варіанти назв колонки
         for col in CLIENT_COL_VARIANTS:
             if col in matched_row.index and pd.notna(matched_row[col]) and str(matched_row[col]).strip():
