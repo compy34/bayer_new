@@ -80,21 +80,8 @@ def generate_act_sheet(
         if matched_row is None:
             matched_row = df_req.iloc[0]
 
-        # Виконавець — використовуємо вибрану аптеку/мережу, якщо вибрано конкретну
-        if clean_selected and clean_selected != 'Усі аптеки':
-            executor_name = clean_selected
-        else:
-            # Якщо "Усі аптеки" — беремо з реквізитів (Виконавець або Юридическое лицо)
-            executor_val = matched_row.get('Виконавець')
-            if executor_val is None or (isinstance(executor_val, float) and pd.isna(executor_val)) or not str(executor_val).strip():
-                executor_val = matched_row.get('Юридическое лицо')
-            if executor_val is None or (isinstance(executor_val, float) and pd.isna(executor_val)) or not str(executor_val).strip():
-                executor_val = executor_name
-            executor_name = str(executor_val)
-        # Юридическое лицо — для використання в рядку "між ТОВ "БАЙЄР" та ..."
-        # Handle NaN values - get value and check if it's valid
-        # Also reject values that look like client identifiers (not legal entities)
-        def _is_valid_legal_entity(val):
+        # Helper to validate values aren't client identifiers
+        def _is_valid_entity(val):
             if val is None:
                 return False
             if isinstance(val, float) and pd.isna(val):
@@ -102,19 +89,35 @@ def generate_act_sheet(
             s = str(val).strip()
             if not s:
                 return False
-            # Reject values that look like client column names/values
             s_lower = s.lower()
             client_keywords = ['клиент', 'база', 'customer', 'client', 'покупець', 'замовник']
             if any(kw in s_lower for kw in client_keywords):
                 return False
             return True
 
+        # Виконавець — використовуємо вибрану аптеку/мережу, якщо вибрано конкретну
+        if clean_selected and clean_selected != 'Усі аптеки':
+            executor_name = clean_selected
+        else:
+            # Якщо "Усі аптеки" — беремо з реквізитів (Виконавець або Юридическое лицо)
+            # But reject client-like values
+            executor_val = matched_row.get('Виконавець')
+            if not _is_valid_entity(executor_val):
+                executor_val = matched_row.get('Юридическое лицо')
+            if not _is_valid_entity(executor_val):
+                executor_val = executor_name  # DEFAULT_EXECUTOR_NAME
+            executor_name = str(executor_val)
+
+        # Юридическое лицо — для використання в рядку "між ТОВ "БАЙЄР" та ..."
         # ONLY use 'Юридическое лицо' column for legal entity
-        # If not available or invalid, fall back directly to executor_name
-        # (Don't use 'Виконавець' as fallback for legal_entity - it might contain client data)
+        # If not available or invalid, fall back to executor_name
+        # Final safety: if legal_entity still looks like client identifier, use safe default
         legal_entity_val = matched_row.get('Юридическое лицо')
-        if not _is_valid_legal_entity(legal_entity_val):
+        if not _is_valid_entity(legal_entity_val):
             legal_entity_val = executor_name
+        # Final safety check
+        if not _is_valid_entity(legal_entity_val):
+            legal_entity_val = clean_selected if clean_selected and clean_selected != 'Усі аптеки' else DEFAULT_EXECUTOR_NAME
         legal_entity = str(legal_entity_val)
         # Замовник — пробуємо різні варіанти назв колонки
         customer_name = customer_name  # default
@@ -435,16 +438,32 @@ def generate_tma_act_sheet(
         if matched_row is None:
             matched_row = df_req.iloc[0]
 
+        # Helper to validate values aren't client identifiers
+        def _is_valid_entity(val):
+            if val is None:
+                return False
+            if isinstance(val, float) and pd.isna(val):
+                return False
+            s = str(val).strip()
+            if not s:
+                return False
+            s_lower = s.lower()
+            client_keywords = ['клиент', 'база', 'customer', 'client', 'покупець', 'замовник']
+            if any(kw in s_lower for kw in client_keywords):
+                return False
+            return True
+
         # Виконавець — використовуємо вибрану аптеку/мережу, якщо вибрано конкретну
         if clean_selected and clean_selected != 'Усі аптеки':
             executor_name = clean_selected
         else:
             # Якщо "Усі аптеки" — беремо з реквізитів (Виконавець або Юридическое лицо)
+            # But reject client-like values
             executor_val = matched_row.get('Виконавець')
-            if executor_val is None or (isinstance(executor_val, float) and pd.isna(executor_val)) or not str(executor_val).strip():
+            if not _is_valid_entity(executor_val):
                 executor_val = matched_row.get('Юридическое лицо')
-            if executor_val is None or (isinstance(executor_val, float) and pd.isna(executor_val)) or not str(executor_val).strip():
-                executor_val = executor_name
+            if not _is_valid_entity(executor_val):
+                executor_val = executor_name  # DEFAULT_EXECUTOR_NAME
             executor_name = str(executor_val)
         # Замовник — пробуємо різні варіанти назв колонки
         for col in CLIENT_COL_VARIANTS:
@@ -461,8 +480,13 @@ def generate_tma_act_sheet(
                 line.strip() for line in raw_req_text.split('\n') if line.strip()
             ]
 
-    # Network name for "між ТОВ «БАЙЄР» та {мережа}" - use customer_name from requisites (Клиент из базы данных)
-    network_name = customer_name if customer_name != 'ТОВ «БАЙЄР»' else (selected_pharmacy if selected_pharmacy and selected_pharmacy != 'Усі аптеки' else executor_name)
+    # Legal entity for "між ТОВ «БАЙЄР» та {юридическое лицо}" - use 'Юридическое лицо' from requisites
+    legal_entity_val = matched_row.get('Юридическое лицо') if df_req is not None and not df_req.empty else None
+    if not _is_valid_entity(legal_entity_val):
+        legal_entity_val = executor_name
+    if not _is_valid_entity(legal_entity_val):
+        legal_entity_val = clean_selected if clean_selected and clean_selected != 'Усі аптеки' else DEFAULT_EXECUTOR_NAME
+    network_name = str(legal_entity_val)
 
     # Period formatting (same as other sheets)
     month_names = [
