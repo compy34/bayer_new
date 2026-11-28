@@ -93,10 +93,26 @@ def generate_act_sheet(
             executor_name = str(executor_val)
         # Юридическое лицо — для використання в рядку "між ТОВ "БАЙЄР" та ..."
         # Handle NaN values - get value and check if it's valid
+        # Also reject values that look like client identifiers (not legal entities)
+        def _is_valid_legal_entity(val):
+            if val is None:
+                return False
+            if isinstance(val, float) and pd.isna(val):
+                return False
+            s = str(val).strip()
+            if not s:
+                return False
+            # Reject values that look like client column names/values
+            s_lower = s.lower()
+            client_keywords = ['клиент', 'база', 'customer', 'client', 'покупець', 'замовник']
+            if any(kw in s_lower for kw in client_keywords):
+                return False
+            return True
+
         legal_entity_val = matched_row.get('Юридическое лицо')
-        if legal_entity_val is None or (isinstance(legal_entity_val, float) and pd.isna(legal_entity_val)) or not str(legal_entity_val).strip():
+        if not _is_valid_legal_entity(legal_entity_val):
             legal_entity_val = matched_row.get('Виконавець')
-        if legal_entity_val is None or (isinstance(legal_entity_val, float) and pd.isna(legal_entity_val)) or not str(legal_entity_val).strip():
+        if not _is_valid_legal_entity(legal_entity_val):
             legal_entity_val = executor_name
         legal_entity = str(legal_entity_val)
         # Замовник — пробуємо різні варіанти назв колонки
